@@ -11,6 +11,8 @@ final class VoiceController {
     private var whisper: WhisperBridge?
     private var starting = false   // begin() уже запустил async-старт — не запускать второй (гонка)
     private var abortStart = false // end()/cancel() пришёл во время async-старта → прервать его
+    /// Скрипт раскладки в момент начала диктовки: при voiceLanguage == "auto" определяет целевой язык (en / ru)
+    private var dictationScript: LayoutManager.Script = .latin
     /// СИНХРОННЫЙ флаг намерения: true с момента begin() и до остановки записи. Источник истины
     /// для toggle (EventTap), т.к. begin() асинхронный и recorder.isRecording в момент toggle ещё false.
     /// Прокси к атомарному VoiceGate: колбэк CGEventTap читает это СИНХРОННО, а сам begin/end
@@ -222,6 +224,7 @@ final class VoiceController {
         VoiceGate.set(true)            // СИНХРОННО: намерение записывать — toggle сразу видит активность
         starting = true
         abortStart = false
+        dictationScript = layout.currentScript()
         lastVoiceUseAt = Date()        // маркер «пользователь диктует» для анти-карусели pressure-выгрузки
         Task { @MainActor in
             defer { starting = false }
@@ -988,7 +991,20 @@ final class VoiceController {
     }
 
     /// Язык для whisper — из настроек (по умолчанию язык ОС, НЕ раскладки). "auto" → whisper определит.
-    private func languageForWhisper() -> String { settings.voiceLanguage }
+    private func languageForWhisper() -> String {
+        let lang = settings.voiceLanguage
+        if lang == "auto" {
+            switch dictationScript {
+            case .latin:
+                return "en"
+            case .cyrillic:
+                return "ru"
+            case .other:
+                return "auto"
+            }
+        }
+        return lang
+    }
 
     // MARK: - Импорт файла (задача 229)
 

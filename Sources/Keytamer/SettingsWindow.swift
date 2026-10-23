@@ -235,7 +235,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         sidebarItem.maximumThickness = DS.sidebarWidth
         sidebarItem.canCollapse = false
         let detailItem = NSSplitViewItem(viewController: detail)
-        if #available(macOS 26.0, *) { detailItem.automaticallyAdjustsSafeAreaInsets = true }
+        // if #available(macOS 26.0, *) { detailItem.automaticallyAdjustsSafeAreaInsets = true }
         split.addSplitViewItem(sidebarItem)
         split.addSplitViewItem(detailItem)
 

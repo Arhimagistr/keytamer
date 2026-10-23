@@ -72,13 +72,29 @@ enum RivalTapWatch {
               t.tappingProcess != mine, t.processBeingTapped == 0,
               t.tapPoint == .cghidEventTap || t.tapPoint == .cgSessionEventTap,
               (t.eventsOfInterest & keyMask) != 0 else { return false }
-        if let path = pathOf(t.tappingProcess), isSystemPath(path) { return false }
+        if let path = pathOf(t.tappingProcess) {
+            if isSystemPath(path) { return false }
+            if isHarmlessApp(path) { return false }
+        }
         return true
     }
 
     static func isSystemPath(_ path: String) -> Bool {
         ["/System/", "/usr/libexec/", "/usr/sbin/", "/usr/bin/", "/sbin/", "/bin/"]
             .contains { path.hasPrefix($0) }
+    }
+
+    /// Утилиты жестов, оконные менеджеры и лаунчеры, которые регистрируют активный тап клавиатуры,
+    /// но НЕ являются конкурирующими переключателями раскладки (Punto/Caramba) и не съедают обычный ввод.
+    /// Уход на annotated из-за них ломает доставку в неактивирующие панели (Qedit, Spotlight, меню).
+    static func isHarmlessApp(_ path: String) -> Bool {
+        let harmlessNames = [
+            "BetterTouchTool", "Raycast", "Alfred", "Rectangle",
+            "AltTab", "Magnet", "CleanShot", "Shottr",
+            "Maccy", "Paste", "Dropover", "Homerow", "Shortcat"
+        ]
+        let name = (path as NSString).lastPathComponent
+        return harmlessNames.contains { name.contains($0) || path.contains("\($0).app") }
     }
 
     private static func executablePath(_ pid: pid_t) -> String? {
