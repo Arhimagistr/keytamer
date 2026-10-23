@@ -3523,6 +3523,8 @@ final class DetailVC: NSViewController {
                 // было неоткуда. Подпись однострочная и усекается (settingRow), длинное объяснение — в help.
                 controlRow(L10n.t("voice.lang"), voiceLangControl(),
                            subtitle: L10n.t("voice.langSub"), help: L10n.t("voice.langHelp"), key: "voice.lang"),
+                controlRow(L10n.t("voice.autoSwitchLayout"), voiceAutoSwitchLayoutControl(),
+                           subtitle: L10n.t("voice.autoSwitchLayoutSub"), help: L10n.t("voice.autoSwitchLayoutHelp"), key: "voice.autoSwitchLayout"),
             ]),
             group(6),
             // ⚠️ ПОДЗАГОЛОВОК ВПЛОТНУЮ К СВОЕЙ КАРТОЧКЕ, БЕЗ ПРОКЛАДКИ (автор 24.09.2026). Здесь после
@@ -4189,8 +4191,8 @@ final class DetailVC: NSViewController {
     @objc private func toggleVoiceTrailSpace(_ s: NSSwitch) { settings.voiceTrailingSpace = (s.state == .on) }
 
     private weak var clipboardThresholdBox: CollapsibleRow?
+    private weak var clipboardPopUp: NSPopUpButton?
     private weak var clipboardCustomField: NSTextField?
-    private weak var clipboardUnitLabel: NSTextField?
     private static let clipboardThresholdPresets: [(String, Int)] = [
         ("voice.clipboardThreshAll", 0),
         ("voice.clipboardThresh30", 30),
@@ -4207,6 +4209,7 @@ final class DetailVC: NSViewController {
         pop.selectItem(at: presetIdx)
         pop.target = self
         pop.action = #selector(clipboardThresholdChanged(_:))
+        clipboardPopUp = pop
 
         let field = NSTextField(frame: .zero)
         field.font = .systemFont(ofSize: 12)
@@ -4220,11 +4223,6 @@ final class DetailVC: NSViewController {
         let unit = NSTextField(labelWithString: L10n.t("voice.charsUnit"))
         unit.font = .systemFont(ofSize: 12)
         unit.textColor = .secondaryLabelColor
-        clipboardUnitLabel = unit
-
-        let isCustom = (presetIdx == 4)
-        field.isHidden = !isCustom
-        unit.isHidden = !isCustom
 
         let stack = NSStackView(views: [pop, field, unit])
         stack.orientation = .horizontal
@@ -4237,15 +4235,7 @@ final class DetailVC: NSViewController {
         let idx = p.indexOfSelectedItem
         guard idx >= 0, idx < Self.clipboardThresholdPresets.count else { return }
         let val = Self.clipboardThresholdPresets[idx].1
-        if val == -1 {
-            clipboardCustomField?.isHidden = false
-            clipboardUnitLabel?.isHidden = false
-            if let str = clipboardCustomField?.stringValue, let num = Int(str), num >= 0 {
-                settings.voiceClipboardThreshold = num
-            }
-        } else {
-            clipboardCustomField?.isHidden = true
-            clipboardUnitLabel?.isHidden = true
+        if val >= 0 {
             settings.voiceClipboardThreshold = val
             clipboardCustomField?.stringValue = "\(val)"
         }
@@ -4257,6 +4247,11 @@ final class DetailVC: NSViewController {
             let clamped = min(num, 10_000)
             f.stringValue = "\(clamped)"
             settings.voiceClipboardThreshold = clamped
+            if let idx = Self.clipboardThresholdPresets.firstIndex(where: { $0.1 == clamped }) {
+                clipboardPopUp?.selectItem(at: idx)
+            } else {
+                clipboardPopUp?.selectItem(at: 4) // "Свой порог…"
+            }
         } else {
             f.stringValue = "\(settings.voiceClipboardThreshold)"
         }
@@ -4358,6 +4353,35 @@ final class DetailVC: NSViewController {
     @objc private func voiceLangChanged(_ s: NSPopUpButton) {
         let i = s.indexOfSelectedItem
         if i >= 0, i < voiceLangCodes.count { settings.voiceLanguage = voiceLangCodes[i] }
+    }
+
+    private var voiceAutoSwitchCodes: [String] = []
+    private func voiceAutoSwitchLayoutControl() -> NSView {
+        let pop = NSPopUpButton()
+        voiceAutoSwitchCodes = ["off", "ru", "en"]
+        pop.addItem(withTitle: L10n.t("voice.autoSwitchOff"))
+        pop.addItem(withTitle: L10n.t("voice.autoSwitchRU"))
+        pop.addItem(withTitle: L10n.t("voice.autoSwitchEN"))
+
+        let extraLayouts = LayoutManager.availableLayouts()
+        for l in extraLayouts {
+            if !l.isCyrillic && !l.languageCode.hasPrefix("en") && !l.id.contains("Russian") && !l.id.contains("ABC") && !l.id.contains("US") {
+                pop.addItem(withTitle: "\(l.localizedName) (\(l.languageCode.uppercased()))")
+                voiceAutoSwitchCodes.append(l.id)
+            }
+        }
+        let cur = settings.voiceAutoSwitchLayout
+        let idx = voiceAutoSwitchCodes.firstIndex(of: cur) ?? 0
+        pop.selectItem(at: idx)
+        pop.target = self
+        pop.action = #selector(voiceAutoSwitchLayoutChanged(_:))
+        return pop
+    }
+    @objc private func voiceAutoSwitchLayoutChanged(_ s: NSPopUpButton) {
+        let i = s.indexOfSelectedItem
+        if i >= 0, i < voiceAutoSwitchCodes.count {
+            settings.voiceAutoSwitchLayout = voiceAutoSwitchCodes[i]
+        }
     }
 
     // MARK: - Карточки (нативный grouped-стиль macOS System Settings)

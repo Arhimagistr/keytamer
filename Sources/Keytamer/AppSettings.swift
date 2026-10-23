@@ -523,6 +523,12 @@ final class AppSettings {
         set { d.set(newValue, forKey: "voiceLanguage") }
     }
 
+    /// Автоматическое переключение раскладки перед записью голоса: "off", "ru", "en" или ID конкретного источника.
+    var voiceAutoSwitchLayout: String {
+        get { d.string(forKey: "voiceAutoSwitchLayout") ?? "off" }
+        set { d.set(newValue, forKey: "voiceAutoSwitchLayout") }
+    }
+
     /// Экспериментально: конвертировать несколько слов группой по хоткею (выключено по умолчанию).
     var groupConvert: Bool { get { d.bool(forKey: "groupConvert") } set { d.set(newValue, forKey: "groupConvert") } }
     /// Глотать дребезг клавиши: повтор той же буквы быстрее 30 мс (T18, просьба #7). ВЫКЛЮЧЕНО по

@@ -183,8 +183,8 @@ final class VoiceIndicator {
             // сломанной плашкой.
             self.label.stringValue = self.recordingRightText()
             // Сказанное это содержание, а служебное время — фон: цвет переключаем вместе со смыслом.
-            // В острове справа всегда время (приглушенное), в обычной плашке наговариваемый текст получает techCyan.
-            self.label.textColor = (self.islandOn || t.isEmpty) ? .secondaryLabelColor : Self.techCyan
+            // В обычной плашке и в острове текст получает techCyan.
+            self.label.textColor = Self.techCyan
             // Позицию НЕ пересчитываем: плашка уже стоит у каретки, а переставлять её на каждом
             // уточнении текста значит дёргать её под рукой у говорящего. Растём только вправо.
             self.relayout(text: self.label.stringValue, showWave: true)
@@ -340,8 +340,8 @@ final class VoiceIndicator {
         // содержание, а не служебная цифра.
         // ⚠️ БЫЛ СИСТЕМНЫЙ ЗЕЛЁНЫЙ (автор 06.08: «очень странный цвет»). Зелёный не наш: во всём
         // приложении статус показывает коралловый акцент, а текст остаётся белым.
-        if m == .recording {
-            label.textColor = (liveText.isEmpty || islandOn) ? .secondaryLabelColor : Self.techCyan
+        if m == .recording || m == .processing {
+            label.textColor = Self.techCyan
         } else {
             label.textColor = .labelColor
         }
@@ -353,11 +353,11 @@ final class VoiceIndicator {
 
         switch m {
         case .recording:
-            wave.color = Self.coral
+            wave.color = Self.techCyan
             wave.start(shimmer: false)
             startTicker()
         case .processing:
-            wave.color = Self.coral.withAlphaComponent(0.9)
+            wave.color = Self.techCyan
             wave.start(shimmer: true)
             startDecoderLoop(text)
         case .toast:
@@ -505,9 +505,6 @@ final class VoiceIndicator {
         let markH: CGFloat = showMark ? (Self.markImage?.size.height ?? dotW) : 0
         let markGap = showMark ? (showWave ? pad : toastGap) : 0
         let waveBlock = showWave ? (waveW + pad) : 0
-        // Кнопки (крестик и галочка) скрыты во время записи:
-        let btns = false
-        let btnBlock: CGFloat = 0
         let total = pad + (showMark ? (markW + markGap) : 0) + waveBlock + lblW + pad
 
         // Сдвиг строки внутри контейнера. У обычной плашки его нет: она ровно по содержимому. У
@@ -536,14 +533,24 @@ final class VoiceIndicator {
         cancelBtn.isHidden = true
         doneBtn.isHidden = true
         dot.isHidden = !showMark
-        if showMark {
-            dot.frame = NSRect(x: x0 + pad, y: rowY + ((rowH - markH) / 2).rounded(),
-                               width: markW, height: markH)
+
+        if islandOn && showWave {
+            // В острове выреза волна динамически растягивается на всю ширину от левого края до таймера:
+            let waveX = pad
+            let waveWidth = max(50, bodyW - 2 * pad - lblW - 10)
+            wave.isHidden = false
+            wave.frame = NSRect(x: waveX, y: rowY + (rowH - 20) / 2, width: waveWidth, height: 20)
+            label.frame = NSRect(x: bodyW - pad - lblW, y: rowY + (rowH - 18) / 2, width: lblW, height: 18)
+        } else {
+            if showMark {
+                dot.frame = NSRect(x: x0 + pad, y: rowY + ((rowH - markH) / 2).rounded(),
+                                   width: markW, height: markH)
+            }
+            let waveX = x0 + pad + (showMark ? (markW + markGap) : 0)
+            wave.isHidden = !showWave
+            if showWave { wave.frame = NSRect(x: waveX, y: rowY + (rowH - 20) / 2, width: waveW, height: 20) }
+            label.frame = NSRect(x: waveX + waveBlock, y: rowY + (rowH - 18) / 2, width: lblW, height: 18)
         }
-        let waveX = x0 + pad + (showMark ? (markW + markGap) : 0)
-        wave.isHidden = !showWave
-        if showWave { wave.frame = NSRect(x: waveX, y: rowY + (rowH - 20) / 2, width: waveW, height: 20) }
-        label.frame = NSRect(x: waveX + waveBlock, y: rowY + (rowH - 18) / 2, width: lblW, height: 18)
 
         // ВТОРАЯ СТРОКА. Ширину ей задаёт КОРПУС, а не текст: остров уже расставлен по первому ряду,
         // и речь обязана уместиться в то, что есть. Поэтому обрезаем по фактической ширине корпуса
@@ -847,75 +854,121 @@ private final class ClickableToastLabel: NSTextField {
     }
 }
 
-/// Компактный waveform: ряд закруглённых баров. «Слушаю» — высоты по громкости микрофона (с авто-
-/// гейном через peak-follower); «Распознаю» — синтетическое спокойное «дыхание». Рендер ~30 fps,
-/// бары плавно тянутся к целям. Цвет — коралл.
+/// Технологичный спектральный waveform: адаптивное количество неоновых баров, градиент Electric Cyan,
+/// рендер 60 fps с физикой затухания и лазерный шиммер-сканер в режиме «Распознаю».
 private final class WaveformView: NSView {
-    private let barCount = 16
-    private var targets: [CGFloat]
-    private var shown: [CGFloat]
+    private var targets: [CGFloat] = []
+    private var shown: [CGFloat] = []
     private var render: Timer?
     private var shimmer = false
     private var phase: CGFloat = 0
     private var peak: Float = 0.03
-    var color: NSColor = VoiceIndicator.coral { didSet { needsDisplay = true } }
+    var color: NSColor = VoiceIndicator.techCyan { didSet { needsDisplay = true } }
+
+    private let barWidth: CGFloat = 2.5
+    private let barGap: CGFloat = 2.0
 
     override init(frame frameRect: NSRect) {
-        targets = Array(repeating: 0.06, count: barCount)
-        shown = targets
         super.init(frame: frameRect)
         wantsLayer = true
+        ensureCapacity(forWidth: frameRect.width)
     }
     required init?(coder: NSCoder) { fatalError("no xib") }
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-    /// Новый уровень микрофона (RMS) → правый край ленты (бары едут влево).
+    override var frame: NSRect {
+        didSet {
+            if frame.width != oldValue.width {
+                ensureCapacity(forWidth: frame.width)
+            }
+        }
+    }
+
+    private func barCount(for width: CGFloat) -> Int {
+        let w = max(50, width)
+        return max(12, min(64, Int((w + barGap) / (barWidth + barGap))))
+    }
+
+    private func ensureCapacity(forWidth width: CGFloat) {
+        let count = barCount(for: width)
+        if targets.count != count {
+            targets = Array(repeating: 0.08, count: count)
+            shown = targets
+            needsDisplay = true
+        }
+    }
+
+    /// Новый уровень микрофона (RMS) → волна.
     func push(_ rms: Float) {
         peak = Swift.max(rms, peak * 0.92)               // следящий пик → авто-гейн под любой микрофон
         let n = Swift.min(1, rms / Swift.max(peak, 0.02))
         let v = CGFloat(0.08 + 0.92 * pow(n, 0.65))      // лёгкая кривая + минимальная высота
-        targets.removeFirst(); targets.append(v)
+        if !targets.isEmpty {
+            targets.removeFirst()
+            targets.append(v)
+        }
     }
 
     func start(shimmer: Bool) {
         self.shimmer = shimmer
-        if !shimmer { peak = 0.03; for i in 0..<barCount { targets[i] = 0.08 } }
+        ensureCapacity(forWidth: bounds.width)
+        if !shimmer {
+            peak = 0.03
+            for i in 0..<targets.count { targets[i] = 0.08 }
+        }
         guard render == nil else { return }
-        let t = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in self?.tick() }
+        // 60 fps для плавного неонового рендера
+        let t = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in self?.tick() }
         RunLoop.main.add(t, forMode: .common)
         render = t
     }
+
     func stop() { render?.invalidate(); render = nil }
 
     private func tick() {
+        let count = targets.count
+        guard count > 0 else { return }
         if shimmer {
-            phase += 0.16
-            for i in 0..<barCount {
-                let s = sin(phase + CGFloat(i) * 0.55)
-                targets[i] = 0.16 + 0.14 * (s * 0.5 + 0.5)   // тихое дыхание
+            phase += 0.09
+            // Технологичный сканирующий импульс (shimmer beam sweep)
+            let center = (sin(phase) * 0.5 + 0.5) * CGFloat(count - 1)
+            for i in 0..<count {
+                let dist = abs(CGFloat(i) - center)
+                let intensity = exp(-dist * dist / 14.0)
+                targets[i] = 0.12 + 0.82 * intensity
             }
         }
         var changed = false
-        for i in 0..<barCount {
+        for i in 0..<count {
             let d = targets[i] - shown[i]
-            if abs(d) > 0.002 { shown[i] += d * 0.34; changed = true }
+            if abs(d) > 0.001 {
+                shown[i] += d * 0.28
+                changed = true
+            }
         }
         if changed { needsDisplay = true }
     }
 
     override func draw(_ dirtyRect: NSRect) {
         let w = bounds.width, h = bounds.height
-        let bw: CGFloat = 2.0
-        guard barCount > 1 else { return }
-        let gap = (w - CGFloat(barCount) * bw) / CGFloat(barCount - 1)
-        color.setFill()
-        for i in 0..<barCount {
-            let bh = Swift.max(bw, shown[i] * h)
-            let x = CGFloat(i) * (bw + gap)
+        let count = shown.count
+        guard count > 1 else { return }
+        let totalBarsWidth = CGFloat(count) * barWidth
+        let dynamicGap = max(1.5, (w - totalBarsWidth) / CGFloat(count - 1))
+
+        // Градиент неонового Electric Cyan
+        let topColor = NSColor(srgbRed: 0.15, green: 0.95, blue: 1.0, alpha: 1.0)
+        let bottomColor = NSColor(srgbRed: 0.0, green: 0.65, blue: 0.92, alpha: 0.85)
+        let gradient = NSGradient(starting: bottomColor, ending: topColor)
+
+        for i in 0..<count {
+            let bh = Swift.max(barWidth, shown[i] * h)
+            let x = CGFloat(i) * (barWidth + dynamicGap)
             let y = (h - bh) / 2
-            NSBezierPath(roundedRect: NSRect(x: x, y: y, width: bw, height: bh),
-                         xRadius: bw / 2, yRadius: bw / 2).fill()
+            let barRect = NSRect(x: x, y: y, width: barWidth, height: bh)
+            let path = NSBezierPath(roundedRect: barRect, xRadius: barWidth / 2, yRadius: barWidth / 2)
+            gradient?.draw(in: path, angle: 90)
         }
     }
 }

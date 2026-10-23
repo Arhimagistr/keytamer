@@ -225,6 +225,16 @@ final class VoiceController {
         starting = true
         abortStart = false
         dictationScript = layout.currentScript()
+        let autoLayout = settings.voiceAutoSwitchLayout
+        if autoLayout != "off" {
+            if autoLayout == "ru" {
+                layout.selectLayout(cyrillic: true)
+            } else if autoLayout == "en" {
+                layout.selectLayout(cyrillic: false)
+            } else {
+                layout.selectSource(id: autoLayout)
+            }
+        }
         lastVoiceUseAt = Date()        // маркер «пользователь диктует» для анти-карусели pressure-выгрузки
         Task { @MainActor in
             defer { starting = false }
@@ -990,20 +1000,9 @@ final class VoiceController {
         }
     }
 
-    /// Язык для whisper — из настроек (по умолчанию язык ОС, НЕ раскладки). "auto" → whisper определит.
+    /// Язык для whisper — из настроек (по умолчанию "auto" → акустическое автоопределение).
     private func languageForWhisper() -> String {
-        let lang = settings.voiceLanguage
-        if lang == "auto" {
-            switch dictationScript {
-            case .latin:
-                return "en"
-            case .cyrillic:
-                return "ru"
-            case .other:
-                return "auto"
-            }
-        }
-        return lang
+        settings.voiceLanguage
     }
 
     // MARK: - Импорт файла (задача 229)

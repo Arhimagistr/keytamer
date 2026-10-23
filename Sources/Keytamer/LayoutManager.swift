@@ -640,6 +640,55 @@ final class LayoutManager {
         }
     }
 
+    struct KeyboardSourceInfo {
+        let id: String
+        let localizedName: String
+        let languageCode: String
+        let isCyrillic: Bool
+        let isLatin: Bool
+    }
+
+    /// Список всех включённых системных клавиатурных раскладок для настроек.
+    static func availableLayouts() -> [KeyboardSourceInfo] {
+        guard let cf = TISCreateInputSourceList(nil, false)?.takeRetainedValue() else { return [] }
+        let count = CFArrayGetCount(cf)
+        var result: [KeyboardSourceInfo] = []
+        for i in 0..<count {
+            guard let raw = CFArrayGetValueAtIndex(cf, i) else { continue }
+            let src = Unmanaged<TISInputSource>.fromOpaque(raw).takeUnretainedValue()
+            guard stringProp(src, kTISPropertyInputSourceCategory) == (kTISCategoryKeyboardInputSource as String) else { continue }
+            guard boolProp(src, kTISPropertyInputSourceIsSelectCapable) else { continue }
+            guard boolProp(src, kTISPropertyInputSourceIsEnabled) else { continue }
+            guard let id = stringProp(src, kTISPropertyInputSourceID) else { continue }
+            let name = stringProp(src, kTISPropertyLocalizedName) ?? id
+            let lang = languages(of: src).first ?? ""
+            let cyr = lang.hasPrefix("ru")
+            let lat = isUsableLatinLayout(src)
+            result.append(KeyboardSourceInfo(id: id, localizedName: name, languageCode: lang, isCyrillic: cyr, isLatin: lat))
+        }
+        return result
+    }
+
+    /// Выбрать конкретную раскладку по её системному InputSourceID.
+    @discardableResult
+    func selectSource(id: String) -> Bool {
+        let sources = enabledKeyboardSources()
+        guard let src = sources.first(where: { Self.stringProp($0, kTISPropertyInputSourceID) == id }) else {
+            return false
+        }
+        let ok = TISSelectInputSource(src) == noErr
+        if ok {
+            let cyrillic = (Self.languages(of: src).first ?? "").hasPrefix("ru")
+            opinionCyr = cyrillic
+            setExactOpinion(id)
+            CapsLED.set(cyrillic: cyrillic)
+            lastSelectAt = ProcessInfo.processInfo.systemUptime
+            if Thread.isMainThread { KeyboardLayoutCache.refresh(fromSelected: src) }
+            else { DispatchQueue.main.async { KeyboardLayoutCache.refresh(fromSelected: src) } }
+        }
+        return ok
+    }
+
     // MARK: - Внутреннее
 
     private func enabledKeyboardSources() -> [TISInputSource] {
