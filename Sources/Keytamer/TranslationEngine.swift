@@ -1,0 +1,288 @@
+import AppKit
+#if canImport(Translation)
+import SwiftUI
+import Translation
+
+/// Перевод текста on-device через Apple Translation framework (macOS 15+).
+/// Ноль сетевых запросов в рантайме после первичной загрузки языкового пака (её делает
+/// СИСТЕМА по явному системному промпту — честный opt-in). Без модели и линковки.
+/// API доступен только через SwiftUI `.translationTask`, поэтому держим скрытый NSHostingView.
+@available(macOS 15.0, *)
+@MainActor
+final class TranslationEngine {
+    static let shared = TranslationEngine()
+    private var window: NSWindow?
+    private let model = TranslateModel()
+
+    /// Перевести строку. from/to — коды языков ("ru"/"en"). nil — если не вышло.
+    /// ВСЕГДА молча, БЕЗ какого-либо видимого окна. Окно-хост существует только невидимым
+    /// off-screen — нужно SwiftUI-lifecycle, чтобы срабатывал `.translationTask`. Если пакет
+    /// не скачан — не дёргаем систему (промпт всё равно не показать без видимого окна, а оно
+    /// виснет): возвращаем nil, пользователь качает пакет в Настройках → Перевод.
+    func translate(_ text: String, from: String, to: String) async -> String? {
+        guard await isInstalled(from: from, to: to) else {
+            kbLog("translate: пакет \(from)→\(to) не установлен — нужны «Системные настройки» в Настройках → Перевод")
+            return nil
+        }
+        ensureHost()
+        return await withTimeout(8) { [model] in await model.translate(text: text, from: from, to: to) }
+    }
+
+    /// Что система говорит про языковую пару. ТРИ состояния, а не два.
+    ///
+    /// ⚠️ РАЗВЕДЕНО ПО ОТЗЫВУ #102 (07.08.2026). Человек пишет «после каждого обновления приходится
+    /// пак языка ставить заново», а разобрать это оказалось нечем: мы схлопывали ответ системы в
+    /// Bool и нигде его не логировали. В итоге «пакет не установлен» и «система вообще не умеет эту
+    /// пару» выглядели одинаково и для нас, и для человека, а в диагностике не оставалось ни следа.
+    /// Механизм жалобы так и не найден (разбор 07.08 опроверг собственную версию про смену SDK:
+    /// все выпущенные сборки собраны одним и тем же), поэтому чинить вслепую нечего — но следующий
+    /// такой отзыв должен приходить с ответом внутри.
+    enum PackStatus { case installed, notDownloaded, unsupported }
+
+    func packStatus(from: String, to: String) async -> PackStatus {
+        let s = await LanguageAvailability().status(from: Locale.Language(identifier: from),
+                                                    to: Locale.Language(identifier: to))
+        let mapped: PackStatus
+        switch s {
+        case .installed:   mapped = .installed
+        case .supported:   mapped = .notDownloaded
+        case .unsupported: mapped = .unsupported
+        @unknown default:  mapped = .unsupported
+        }
+        kbLog("translate: пара \(from)→\(to) — система отвечает «\(s)» → \(mapped)")
+        return mapped
+    }
+
+    /// Установлен ли пакет. Оставлено для тех мест, которым правда нужен только да/нет.
+    func isInstalled(from: String, to: String) async -> Bool {
+        await packStatus(from: from, to: to) == .installed
+    }
+
+    private var downloadWindow: NSWindow?
+
+    /// Явная докачка языковых пакетов ПО КНОПКЕ (кнопка в настройках / действие баннера).
+    /// Ключевое: показываем МАЛЕНЬКОЕ ВИДИМОЕ окно на время докачки. Системный лист скачивания
+    /// Apple («Download “Russian”?» + прогресс) привязывается к ВИДИМОМУ view приложения — на
+    /// off-screen окне (наш translate-хост) он не может показаться и всё виснет. Отсюда и решение.
+    /// Пары готовим последовательно (ru→en, затем en→ru), чтобы работали оба направления сразу.
+    func presentDownload(pairs: [(from: String, to: String)], completion: @escaping (Bool) -> Void) {
+        if downloadWindow != nil { return }                 // уже открыто — не плодим окна
+        let dl = PackDownloader()
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 380, height: 160),
+                         styleMask: [.titled], backing: .buffered, defer: false)
+        w.title = L10n.t("tr.dlTitle")
+        w.isReleasedWhenClosed = false
+        w.center()
+        w.contentView = NSHostingView(rootView: PackDownloadHost(model: dl, pairs: pairs))
+        downloadWindow = w
+        dl.onFinish = { [weak self, weak w] installed in
+            w?.close()
+            self?.downloadWindow = nil
+            completion(installed)
+        }
+        NSApp.activate(ignoringOtherApps: true)             // агент из меню-бара — иначе окно не выйдет вперёд
+        w.makeKeyAndOrderFront(nil)
+    }
+
+    /// Выполнить async-операцию с жёстким таймаутом: по истечении — отменяем модель
+    /// (резолвим континуацию nil), чтобы вызывающий не завис.
+    private func withTimeout(_ seconds: Double, _ op: @escaping () async -> String?) async -> String? {
+        let watchdog = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            if !Task.isCancelled { kbLog("translate: таймаут \(Int(seconds))с — отмена"); self?.model.cancel() }
+        }
+        let r = await op()
+        watchdog.cancel()
+        return r
+    }
+
+    private func ensureHost() {
+        guard window == nil else { return }
+        // Невидимое borderless-окно строго за экраном — НИКОГДА не показывается пользователю.
+        // Нужно лишь чтобы жил SwiftUI-lifecycle и срабатывал `.translationTask` для уже
+        // установленных пар. Никаких промптов/прогресса тут не показываем (это виснет).
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1, height: 1),
+                         styleMask: [.borderless], backing: .buffered, defer: false)
+        w.alphaValue = 0; w.ignoresMouseEvents = true
+        // ⚠️ MISSION CONTROL НЕ ДОЛЖЕН ВИДЕТЬ ЭТО ОКНО (задача 83, отзывы #92/#93 и #201/#202).
+        // Без явного collectionBehavior окно обычного уровня получает `.managed`, то есть
+        // «участвует в Spaces и Exposé» (NSWindow.h). Mission Control без группировки по
+        // приложениям подгоняет масштаб под рамку ВСЕХ таких окон, и наше, стоящее в -10000,
+        // растягивало эту рамку в разы: настоящие окна сжимались в точки, со стороны «все окна
+        // исчезли». Прозрачность 0 от этого НЕ спасает — проверено на реальной машине 23.09.2026:
+        // до первого перевода окна в Mission Control видны, после ⌥⇧T пропадают, перезапуск
+        // «чинит», потому что окно умирает вместе с процессом. С группировкой раскладка идёт
+        // кучками по приложениям, и чужие кучки наше окно не трогает — отсюда деталь из #202.
+        // `.transient` — «hidden by exposé», то же поведение, что у окон выше обычного уровня.
+        // Сам хост нужен: `.translationTask` живёт только в SwiftUI-иерархии окна.
+        w.collectionBehavior = [.transient, .ignoresCycle]
+        w.contentView = NSHostingView(rootView: TranslateHost(model: model))
+        w.setFrameOrigin(NSPoint(x: -10000, y: -10000))
+        w.orderFrontRegardless()
+        window = w
+    }
+}
+
+@available(macOS 15.0, *)
+@MainActor final class TranslateModel: ObservableObject {
+    @Published var config: TranslationSession.Configuration?
+    private var pending: CheckedContinuation<String?, Never>?
+    private var text = ""
+    private var lastFrom = ""
+    private var lastTo = ""
+
+    func translate(text: String, from: String, to: String) async -> String? {
+        if pending != nil { pending?.resume(returning: nil); pending = nil }  // не залипаем на прошлом
+        return await withCheckedContinuation { cont in
+            self.text = text
+            self.pending = cont
+            // КЛЮЧЕВОЕ: та же пара языков → Configuration «равна» прежней, и .translationTask
+            // НЕ перезапустится. Поэтому при повторе той же пары дёргаем invalidate() (штатный
+            // способ перезапустить сессию); при смене направления — создаём новую конфигурацию.
+            if config != nil, from == lastFrom, to == lastTo {
+                config?.invalidate()
+            } else {
+                lastFrom = from; lastTo = to
+                config = TranslationSession.Configuration(
+                    source: Locale.Language(identifier: from),
+                    target: Locale.Language(identifier: to))
+            }
+        }
+    }
+
+    /// Прервать висящую операцию (таймаут / закрытие окна / отмена) — резолвим континуацию nil.
+    func cancel() {
+        if let cont = pending { pending = nil; cont.resume(returning: nil) }
+    }
+
+    func run(_ session: TranslationSession) async {
+        guard let cont = pending else { kbLog("translate: run без pending"); return }
+        pending = nil
+        do {
+            // prepareTranslation триггерит системную докачку языкового пакета (честный opt-in),
+            // если пара ещё не установлена. На уже установленной — мгновенно.
+            try await session.prepareTranslation()
+            let r = try await session.translate(text)
+            kbLog("translate: run → \(r.targetText.count) симв.")   // переведённый текст в лог не пишем
+            cont.resume(returning: r.targetText)
+        } catch {
+            kbLog("translate: ошибка \(error)")
+            cont.resume(returning: nil)
+        }
+    }
+}
+
+@available(macOS 15.0, *)
+private struct TranslateHost: View {
+    @ObservedObject var model: TranslateModel
+    var body: some View {
+        // Невидимая точка — окно никогда не показывается; нужен только живой translationTask.
+        Color.clear
+            .translationTask(model.config) { session in
+                await model.run(session)
+            }
+    }
+}
+
+// MARK: - Докачка языкового пакета (видимое окно, чтобы системный лист скачивания смог показаться)
+
+@available(macOS 15.0, *)
+@MainActor final class PackDownloader: ObservableObject {
+    @Published var config: TranslationSession.Configuration?
+    private var queue: [(from: String, to: String)] = []
+    private var idx = 0
+    private var anyFailed = false
+    var onFinish: ((Bool) -> Void)?
+
+    func start(_ pairs: [(from: String, to: String)]) {
+        guard queue.isEmpty else { return }                 // старт один раз (onAppear может дёрнуться повторно)
+        queue = pairs; idx = 0; anyFailed = false
+        advance()
+    }
+    private func advance() {
+        guard idx < queue.count else { onFinish?(!anyFailed); onFinish = nil; return }
+        let p = queue[idx]
+        // Смена config → .translationTask перезапускается с новой парой (пары различны, перезапуск гарантирован).
+        config = TranslationSession.Configuration(source: Locale.Language(identifier: p.from),
+                                                  target: Locale.Language(identifier: p.to))
+    }
+    func step(_ session: TranslationSession) async {
+        let cur = idx < queue.count ? queue[idx] : (from: "?", to: "?")
+        do {
+            // prepareTranslation триггерит системный лист докачки (если пары нет) — честный opt-in.
+            try await session.prepareTranslation()
+        } catch {
+            anyFailed = true
+            kbLog("pack: \(cur.from)→\(cur.to) подготовка бросила ошибку — \(error)")
+            idx += 1; advance(); return
+        }
+        // ⚠️ ВОЗВРАТ ИЗ prepareTranslation НЕ ЗНАЧИТ «УСТАНОВЛЕНО» (отзывы #102 и #108, 08.08.2026).
+        //
+        // Раньше здесь стояло «не бросило исключение → пишем в лог „подготовлен“ → закрываем окно →
+        // рапортуем успех». Но система возвращает управление и в тех случаях, когда пакета в итоге
+        // нет: человек закрыл системный лист скачивания, отказался, или загрузка ещё идёт своим
+        // чередом. Снаружи это выглядело так: нажал «Скачать», окно закрылось как при удаче, а
+        // перевод по-прежнему говорит «нужен языковой пакет». Ровно два отзыва об этом и пришли:
+        // «не могу настроить (скачать) перевод» и «после каждого обновления приходится ставить
+        // заново» — во втором случае пакет, скорее всего, не ставился НИ РАЗУ, а человек просто
+        // повторял ритуал.
+        //
+        // Поэтому спрашиваем СИСТЕМУ, а не доверяем возврату: ждём статуса `.installed`, опрашивая
+        // раз в секунду. Потолок 90 с — это не «загрузка занимает столько», а «дольше ждать в
+        // модальном окне бесчеловечно»; при истечении честно докладываем неудачу.
+        let ok = await Self.waitInstalled(from: cur.from, to: cur.to, timeout: 90)
+        if !ok { anyFailed = true }
+        idx += 1
+        advance()
+    }
+
+    /// Опрашивать систему, пока пара не станет установленной. Возвращает false по таймауту.
+    private static func waitInstalled(from: String, to: String, timeout: Double) async -> Bool {
+        let src = Locale.Language(identifier: from), dst = Locale.Language(identifier: to)
+        let avail = LanguageAvailability()
+        let deadline = Date().addingTimeInterval(timeout)
+        var last = ""
+        while Date() < deadline {
+            let st = await avail.status(from: src, to: dst)
+            let now = "\(st)"
+            if now != last { kbLog("pack: \(from)→\(to) статус «\(now)»"); last = now }
+            if st == .installed {
+                kbLog("pack: \(from)→\(to) УСТАНОВЛЕН ✓")
+                return true
+            }
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+        }
+        kbLog("pack: \(from)→\(to) НЕ установлен за \(Int(timeout))с (последний статус «\(last)»)")
+        return false
+    }
+}
+
+@available(macOS 15.0, *)
+private struct PackDownloadHost: View {
+    @ObservedObject var model: PackDownloader
+    let pairs: [(from: String, to: String)]
+    var body: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+            Text(L10n.t("tr.dlBody"))
+                .font(.system(size: 12)).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(20)
+        // config выставляется в start() (из onAppear) — гарантируем, что view уже смонтирован.
+        .translationTask(model.config) { session in
+            await model.step(session)
+        }
+        .onAppear { model.start(pairs) }
+    }
+}
+#endif
+
+/// Определение направления RU↔EN по содержимому (кириллица → ru→en, иначе en→ru).
+enum TranslateDirection {
+    static func of(_ text: String) -> (from: String, to: String) {
+        let hasCyr = text.unicodeScalars.contains { $0.value >= 0x0400 && $0.value <= 0x04FF }
+        return hasCyr ? ("ru", "en") : ("en", "ru")
+    }
+}
