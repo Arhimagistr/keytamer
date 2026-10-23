@@ -7,6 +7,8 @@ final class VoiceIndicator {
     static let shared = VoiceIndicator()
     /// Фирменный коралл #FF7A59 («наш оранжевый»).
     static let coral = NSColor(srgbRed: 1.0, green: 0.478, blue: 0.349, alpha: 1)
+    /// Технологичный цвет наговариваемого текста (Electric Cyan).
+    static let techCyan = NSColor(srgbRed: 0.22, green: 0.88, blue: 0.99, alpha: 1)
 
     private var panel: NSPanel?
     private var bg: NSVisualEffectView?
@@ -145,12 +147,9 @@ final class VoiceIndicator {
     /// тикать таймер, а речь идёт ниже, и две роли в одной метке не уживаются.
     private lazy var liveLabel: NSTextField = {
         let l = ClickableToastLabel(labelWithString: "")
-        l.font = .systemFont(ofSize: 11, weight: .regular)
-        // ⚠️ ПРИГЛУШЁННЫЙ, КАК ТАЙМЕР (автор 13.08). Белым он спорил бы с коралловой волной за
-        // внимание, а черновик распознавания это ещё не текст, а намёк на него: гипотеза каждую
-        // секунду переписывается. Цвет тот же, что у времени, чтобы обе служебные строки читались
-        // как один слой под главным.
-        l.textColor = .secondaryLabelColor
+        l.font = .systemFont(ofSize: 11.5, weight: .medium)
+        // Технологичный контрастный цвет для наговариваемого текста:
+        l.textColor = VoiceIndicator.techCyan
         l.alignment = .center
         l.lineBreakMode = .byTruncatingHead
         return l
@@ -184,8 +183,8 @@ final class VoiceIndicator {
             // сломанной плашкой.
             self.label.stringValue = self.recordingRightText()
             // Сказанное это содержание, а служебное время — фон: цвет переключаем вместе со смыслом.
-            // В острове справа всегда время, значит там колонка всегда приглушённая.
-            self.label.textColor = (self.islandOn || t.isEmpty) ? .secondaryLabelColor : .labelColor
+            // В острове справа всегда время (приглушенное), в обычной плашке наговариваемый текст получает techCyan.
+            self.label.textColor = (self.islandOn || t.isEmpty) ? .secondaryLabelColor : Self.techCyan
             // Позицию НЕ пересчитываем: плашка уже стоит у каретки, а переставлять её на каждом
             // уточнении текста значит дёргать её под рукой у говорящего. Растём только вправо.
             self.relayout(text: self.label.stringValue, showWave: true)
@@ -341,12 +340,13 @@ final class VoiceIndicator {
         // содержание, а не служебная цифра.
         // ⚠️ БЫЛ СИСТЕМНЫЙ ЗЕЛЁНЫЙ (автор 06.08: «очень странный цвет»). Зелёный не наш: во всём
         // приложении статус показывает коралловый акцент, а текст остаётся белым.
-        label.textColor = (m == .recording && liveText.isEmpty) ? .secondaryLabelColor : .labelColor
-        // ⚠️ ЗНАК ТЕПЕРЬ ВИДЕН ВСЕГДА, А НЕ ТОЛЬКО У ТОСТА (задача 125). Плашка записи была
-        // единственной поверхностью приложения без нашего знака, то есть ровно та, которую человек
-        // видит чаще всего, ничем не подписана. Теперь скелет один на все три состояния:
-        // знак → волна → правая колонка (таймер, статус или сказанное).
-        dot.isHidden = false
+        if m == .recording {
+            label.textColor = (liveText.isEmpty || islandOn) ? .secondaryLabelColor : Self.techCyan
+        } else {
+            label.textColor = .labelColor
+        }
+        // Во время записи логотип скрыт по запросу пользователя. Знак виден только в тостах.
+        dot.isHidden = (m == .recording) || (islandOn && m != .toast)
 
         let showWave = (m != .toast)
         relayout(text: text, showWave: showWave)
@@ -500,14 +500,15 @@ final class VoiceIndicator {
         } else {
             label.toolTip = nil
         }
-        let markSize = Self.markImage?.size ?? NSSize(width: dotW, height: dotW)
-        let markGap = showWave ? pad : toastGap
+        let showMark = (mode != .recording) && ((mode == .toast) || !islandOn)
+        let markW: CGFloat = showMark ? (Self.markImage?.size.width ?? dotW) : 0
+        let markH: CGFloat = showMark ? (Self.markImage?.size.height ?? dotW) : 0
+        let markGap = showMark ? (showWave ? pad : toastGap) : 0
         let waveBlock = showWave ? (waveW + pad) : 0
-        // Кнопки живут только в острове и только на записи: в обычной плашке им не место, там нет
-        // ни повода (её не надо завершать мышью), ни площади.
-        let btns = islandOn && mode == .recording
-        let btnBlock = btns ? (IslandButton.side + pad) : 0
-        let total = pad + btnBlock + markSize.width + markGap + waveBlock + lblW + btnBlock + pad
+        // Кнопки (крестик и галочка) скрыты во время записи:
+        let btns = false
+        let btnBlock: CGFloat = 0
+        let total = pad + (showMark ? (markW + markGap) : 0) + waveBlock + lblW + pad
 
         // Сдвиг строки внутри контейнера. У обычной плашки его нет: она ровно по содержимому. У
         // острова корпус не бывает уже выреза с плечами, значит бывает шире строки — и строку в нём
@@ -532,17 +533,14 @@ final class VoiceIndicator {
         // прижат к кромке выреза, и двигать надо не его, а то, что под ним.
         let rowY = liveRowOn ? (liveRowH + liveGap) : 0
 
-        cancelBtn.isHidden = !btns
-        doneBtn.isHidden = !btns
-        if btns {
-            let y = rowY + ((rowH - IslandButton.side) / 2).rounded()
-            cancelBtn.frame = NSRect(x: x0 + pad, y: y, width: IslandButton.side, height: IslandButton.side)
-            doneBtn.frame = NSRect(x: x0 + total - pad - IslandButton.side, y: y,
-                                   width: IslandButton.side, height: IslandButton.side)
+        cancelBtn.isHidden = true
+        doneBtn.isHidden = true
+        dot.isHidden = !showMark
+        if showMark {
+            dot.frame = NSRect(x: x0 + pad, y: rowY + ((rowH - markH) / 2).rounded(),
+                               width: markW, height: markH)
         }
-        dot.frame = NSRect(x: x0 + pad + btnBlock, y: rowY + ((rowH - markSize.height) / 2).rounded(),
-                           width: markSize.width, height: markSize.height)
-        let waveX = x0 + pad + btnBlock + markSize.width + markGap
+        let waveX = x0 + pad + (showMark ? (markW + markGap) : 0)
         wave.isHidden = !showWave
         if showWave { wave.frame = NSRect(x: waveX, y: rowY + (rowH - 20) / 2, width: waveW, height: 20) }
         label.frame = NSRect(x: waveX + waveBlock, y: rowY + (rowH - 18) / 2, width: lblW, height: 18)
