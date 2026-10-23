@@ -877,10 +877,19 @@ final class VoiceController {
         // См. второй post ниже по файлу: время НАЧАЛА вставки нужно получателю, чтобы отличить
         // «человек ещё ничего не печатал» от «человек уже набрал слово, пока мы печатали своё».
         let insertT0 = ProcessInfo.processInfo.systemUptime
-        TextReplacer.insert(out, thenReturn: autoEnter,
-                            returnMods: CGEventFlags(rawValue: settings.voiceAutoEnterMods)) {
-            NotificationCenter.default.post(name: .keyboopVoiceInserted, object: nil,
-                                            userInfo: ["startedAt": insertT0])
+        let useClipboard = settings.voiceClipboardPaste && (out.count >= settings.voiceClipboardThreshold)
+        if useClipboard {
+            TextReplacer.pasteViaClipboard(out, thenReturn: autoEnter,
+                                           returnMods: CGEventFlags(rawValue: settings.voiceAutoEnterMods)) {
+                NotificationCenter.default.post(name: .keyboopVoiceInserted, object: nil,
+                                                userInfo: ["startedAt": insertT0])
+            }
+        } else {
+            TextReplacer.insert(out, thenReturn: autoEnter,
+                                returnMods: CGEventFlags(rawValue: settings.voiceAutoEnterMods)) {
+                NotificationCenter.default.post(name: .keyboopVoiceInserted, object: nil,
+                                                userInfo: ["startedAt": insertT0])
+            }
         }
         VoiceHistory.shared.add(clean, audio: audio, wave: wave)
     }

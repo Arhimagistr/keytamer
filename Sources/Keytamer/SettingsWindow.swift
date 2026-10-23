@@ -3795,6 +3795,7 @@ final class DetailVC: NSViewController {
         if settings.voiceNoFinalPeriod { parts.append(L10n.t("voice.sumNoDot")) }
         if settings.voiceAutoEnter { parts.append(L10n.t("voice.sumEnter")) }
         if !settings.voiceTrailingSpace { parts.append(L10n.t("voice.sumNoSpace")) }
+        if settings.voiceClipboardPaste { parts.append(L10n.t("voice.sumClipboard")) }
         let summary = parts.isEmpty ? L10n.t("voice.sumDefault") : parts.joined(separator: " · ")
         let link = NSButton(title: "", target: self, action: #selector(toggleVoiceOutputGroup))
         link.isBordered = false; link.setButtonType(.momentaryChange)
@@ -3824,6 +3825,10 @@ final class DetailVC: NSViewController {
             hairline(),
             subordinateRow(switchRow(L10n.t("voice.trailSpace"), L10n.t("voice.trailSpaceSub"), settings.voiceTrailingSpace, #selector(toggleVoiceTrailSpace),
                                      help: L10n.t("voice.trailSpaceHelp"), key: "voice.trailSpace")),
+            hairline(),
+            subordinateRow(switchRow(L10n.t("voice.clipboardPaste"), L10n.t("voice.clipboardPasteSub"), settings.voiceClipboardPaste, #selector(toggleVoiceClipboardPaste),
+                                     help: L10n.t("voice.clipboardPasteHelp"), key: "voice.clipboardPaste")),
+            makeClipboardThresholdBox(),
         ])
         inner.orientation = .vertical; inner.alignment = .width; inner.spacing = 0
         let box = CollapsibleRow(row: inner, separator: hairline(), visible: voiceOutputExpanded ?? false)
@@ -4182,6 +4187,94 @@ final class DetailVC: NSViewController {
         autoEnterBox?.setVisible(on, in: contentStack)
     }
     @objc private func toggleVoiceTrailSpace(_ s: NSSwitch) { settings.voiceTrailingSpace = (s.state == .on) }
+
+    private weak var clipboardThresholdBox: CollapsibleRow?
+    private weak var clipboardCustomField: NSTextField?
+    private weak var clipboardUnitLabel: NSTextField?
+    private static let clipboardThresholdPresets: [(String, Int)] = [
+        ("voice.clipboardThreshAll", 0),
+        ("voice.clipboardThresh30", 30),
+        ("voice.clipboardThresh60", 60),
+        ("voice.clipboardThresh100", 100),
+        ("voice.clipboardThreshCustom", -1)
+    ]
+
+    private func clipboardThresholdControl() -> NSView {
+        let pop = NSPopUpButton(frame: .zero, pullsDown: false)
+        pop.addItems(withTitles: Self.clipboardThresholdPresets.map { L10n.t($0.0) })
+        let cur = settings.voiceClipboardThreshold
+        let presetIdx = Self.clipboardThresholdPresets.firstIndex { $0.1 == cur } ?? 4
+        pop.selectItem(at: presetIdx)
+        pop.target = self
+        pop.action = #selector(clipboardThresholdChanged(_:))
+
+        let field = NSTextField(frame: .zero)
+        field.font = .systemFont(ofSize: 12)
+        field.alignment = .center
+        field.stringValue = "\(cur)"
+        field.target = self
+        field.action = #selector(clipboardCustomFieldChanged(_:))
+        field.widthAnchor.constraint(equalToConstant: 48).isActive = true
+        clipboardCustomField = field
+
+        let unit = NSTextField(labelWithString: L10n.t("voice.charsUnit"))
+        unit.font = .systemFont(ofSize: 12)
+        unit.textColor = .secondaryLabelColor
+        clipboardUnitLabel = unit
+
+        let isCustom = (presetIdx == 4)
+        field.isHidden = !isCustom
+        unit.isHidden = !isCustom
+
+        let stack = NSStackView(views: [pop, field, unit])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 6
+        return stack
+    }
+
+    @objc private func clipboardThresholdChanged(_ p: NSPopUpButton) {
+        let idx = p.indexOfSelectedItem
+        guard idx >= 0, idx < Self.clipboardThresholdPresets.count else { return }
+        let val = Self.clipboardThresholdPresets[idx].1
+        if val == -1 {
+            clipboardCustomField?.isHidden = false
+            clipboardUnitLabel?.isHidden = false
+            if let str = clipboardCustomField?.stringValue, let num = Int(str), num >= 0 {
+                settings.voiceClipboardThreshold = num
+            }
+        } else {
+            clipboardCustomField?.isHidden = true
+            clipboardUnitLabel?.isHidden = true
+            settings.voiceClipboardThreshold = val
+            clipboardCustomField?.stringValue = "\(val)"
+        }
+    }
+
+    @objc private func clipboardCustomFieldChanged(_ f: NSTextField) {
+        let text = f.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let num = Int(text), num >= 0 {
+            let clamped = min(num, 10_000)
+            f.stringValue = "\(clamped)"
+            settings.voiceClipboardThreshold = clamped
+        } else {
+            f.stringValue = "\(settings.voiceClipboardThreshold)"
+        }
+    }
+
+    private func makeClipboardThresholdBox() -> CollapsibleRow {
+        let box = CollapsibleRow(row: subordinateRow(controlRow(L10n.t("voice.clipboardThreshold"), clipboardThresholdControl(),
+                                                                help: L10n.t("voice.clipboardThresholdHelp"), key: "voice.clipboardThreshold")),
+                                 separator: hairline(), visible: settings.voiceClipboardPaste)
+        clipboardThresholdBox = box
+        return box
+    }
+
+    @objc private func toggleVoiceClipboardPaste(_ s: NSSwitch) {
+        let on = (s.state == .on)
+        settings.voiceClipboardPaste = on
+        clipboardThresholdBox?.setVisible(on, in: contentStack)
+    }
     @objc private func toggleVoiceSound(_ s: NSSwitch) {
         let on = (s.state == .on)
         settings.voiceSoundEnabled = on

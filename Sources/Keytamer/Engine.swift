@@ -1449,8 +1449,13 @@ final class Engine: EventTapHandler {
         // импорта файлов, который в «последнюю диктовку» не попадает по построению (lastDictation
         // отдаёт только kind == .dictation).
         muted = true
-        TextReplacer.insert(text) { [weak self] in self?.endSyntheticFlight() }
-        kbLog("последняя диктовка: вставляю \(text.count) симв.")   // только длина, принцип №2
+        let useClipboard = settings.voiceClipboardPaste && (text.count >= settings.voiceClipboardThreshold)
+        if useClipboard {
+            TextReplacer.pasteViaClipboard(text) { [weak self] in self?.endSyntheticFlight() }
+        } else {
+            TextReplacer.insert(text) { [weak self] in self?.endSyntheticFlight() }
+        }
+        kbLog("последняя диктовка: вставляю \(text.count) симв. (через буфер=\(useClipboard))")
     }
 
     /// СМЕНА РЕГИСТРА ВЫДЕЛЕННОГО ТЕКСТА (задача 122).

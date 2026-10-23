@@ -116,6 +116,8 @@ final class AppSettings {
             // миграцию (days→minutes, cap 480) полностью держит computed-геттер voiceHistoryMinutes.
             "escCancelsDictation": true,
             "voiceWarmSeconds": 30,
+            "voiceClipboardPaste": false,
+            "voiceClipboardThreshold": 60,
             // Обучение на отмене: если юзер сразу откатил авто-конверсию и точь-в-точь восстановил
             // оригинал N раз — слово переезжает в «выученные» и больше не трогается. Деф. ВКЛ —
             // безопасно из-за порога + отдельного списка + затухания (см. UndoLearner).
@@ -258,6 +260,23 @@ final class AppSettings {
     /// чатов — Enter, Slack в режиме «Enter = перенос строки», Gmail, Linear и почти вся веб-почта —
     /// ⌘Enter). Просьба автора 29.07 по обратной связи от людей. Храним маску CGEventFlags.
     var voiceAutoEnterMods: UInt64 { get { UInt64(bitPattern: Int64(d.integer(forKey: "voiceAutoEnterMods"))) } set { d.set(Int(bitPattern: UInt(newValue)), forKey: "voiceAutoEnterMods") } }
+
+    /// Вставлять надиктованный текст через системный буфер обмена (⌘V) с сохранением и восстановлением
+    /// предыдущего содержимого буфера. Защищает от обрыва длинных фраз в Electron, браузерах и чатах.
+    var voiceClipboardPaste: Bool {
+        get { d.bool(forKey: "voiceClipboardPaste") }
+        set { d.set(newValue, forKey: "voiceClipboardPaste") }
+    }
+
+    /// Порог длины текста (символы), начиная с которого включается вставка через буфер.
+    /// 0 = всегда через буфер; любое другое число = только для текстов длиной не менее этого порога.
+    var voiceClipboardThreshold: Int {
+        get {
+            let v = d.object(forKey: "voiceClipboardThreshold") as? Int
+            return v ?? 60
+        }
+        set { d.set(newValue, forKey: "voiceClipboardThreshold") }
+    }
 
     // MARK: - Выбор сниппета по хоткею (задача 17, автор 06.08.2026)
 

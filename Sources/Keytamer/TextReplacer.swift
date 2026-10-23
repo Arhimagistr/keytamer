@@ -219,6 +219,84 @@ enum TextReplacer {
         }
     }
 
+    private static let vKey: CGKeyCode = 9
+
+    private static func sendCmdV(source: CGEventSource?) {
+        if let down = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: true) {
+            down.flags = .maskCommand
+            down.setIntegerValueField(.eventSourceUserData, value: kbSyntheticMarker)
+            down.post(tap: synthPostTap)
+        }
+        usleep(900)
+        if let up = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: false) {
+            up.flags = .maskCommand
+            up.setIntegerValueField(.eventSourceUserData, value: kbSyntheticMarker)
+            up.post(tap: synthPostTap)
+        }
+    }
+
+    /// Вставка текста через системный буфер (⌘V) с гарантированным сохранением и восстановлением
+    /// исходного содержимого буфера пользователя (Zero Clipboard Pollution).
+    /// Используется для предотвращения обрывов длинных фраз в Electron, браузерах и чатах.
+    static func pasteViaClipboard(_ text: String, thenReturn: Bool = false, returnMods: CGEventFlags = [],
+                                  completion: (() -> Void)? = nil) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { pasteViaClipboard(text, thenReturn: thenReturn, returnMods: returnMods, completion: completion) }
+            return
+        }
+        guard SecureInputPolicy.canWrite("pasteViaClipboard \(text.count) симв.") else {
+            kbLog("synth: писать нельзя — pasteViaClipboard(\(text.count) симв.) пропущен")
+            completion?()
+            return
+        }
+
+        let pb = NSPasteboard.general
+        PasteboardOwnership.beginOwnedWindow()
+        let snapshot: [[(type: NSPasteboard.PasteboardType, data: Data)]] = (pb.pasteboardItems ?? []).map { item in
+            item.types.compactMap { t in item.data(forType: t).map { (type: t, data: $0) } }
+        }
+
+        pb.clearContents()
+        let item = NSPasteboardItem()
+        item.setString(text, forType: .string)
+        item.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.TransientType"))
+        pb.writeObjects([item])
+        let ours = pb.changeCount
+        pb.kbNoteOurs()
+
+        let src = CGEventSource(stateID: .privateState)
+        sendCmdV(source: src)
+
+        if thenReturn {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                let returnSrc = CGEventSource(stateID: .privateState)
+                postKey(returnKey, source: returnSrc, mods: returnMods)
+            }
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            defer {
+                PasteboardOwnership.endOwnedWindow()
+                completion?()
+            }
+            guard pb.changeCount == ours else {
+                kbLog("voice paste clipboard: буфер сменился на чужой (\(ours)→\(pb.changeCount)) — не восстанавливаю")
+                return
+            }
+            pb.clearContents()
+            if !snapshot.isEmpty {
+                pb.writeObjects(snapshot.map { pairs -> NSPasteboardItem in
+                    let it = NSPasteboardItem()
+                    for p in pairs { it.setData(p.data, forType: p.type) }
+                    it.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.TransientType"))
+                    return it
+                })
+            }
+            pb.kbNoteOurs()
+            kbLog("voice paste clipboard: буфер восстановлен, успешно вставлено \(text.count) симв.")
+        }
+    }
+
     /// Удалить `deleteCount` символов и впечатать `text`.
     /// `firstKeySettleMicros` — пауза перед ПЕРВЫМ Backspace: даём приложению зафиксировать только что
     /// набранное, иначе Backspace прилетает в ещё-незакоммиченное поле и «теряется». Для автозамены
