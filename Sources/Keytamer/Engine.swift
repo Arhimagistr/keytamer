@@ -501,7 +501,7 @@ final class Engine: EventTapHandler {
     }
 
     // Голосовой ввод (hold-to-talk) — делегируем оркестратору.
-    func handleVoiceBegin() { VoiceController.shared.begin() }
+    func handleVoiceBegin(override: Bool = false) { VoiceController.shared.begin(override: override) }
     func handleVoiceEnd() { VoiceController.shared.end() }
 
     /// Возвращает true, если клавишу надо ПРОГЛОТИТЬ (граница слова раскрыла сниппет — см. expandSnippet).
@@ -945,7 +945,7 @@ final class Engine: EventTapHandler {
     // построению. Реальный ввод не глотается вовсе — глотаем только пустышку, а у flagsChanged
     // нет пары down/up, так что инвариант парности не затронут.
     //
-    // Аварийный откат без релиза: defaults write com.keytamer.tamer inlineLiveFix -bool NO
+    // Аварийный откат без релиза: defaults write ru.keyboop.app inlineLiveFix -bool NO
     // (тот же тумблер, что у inline-пути; при выключении работает прежний maybeLiveFix).
 
     /// Когда отправлена последняя пустышка. Пока она в полёте, вторую не постим (таймеры взводятся
@@ -2264,7 +2264,7 @@ final class Engine: EventTapHandler {
     /// сниппетов), чиним слово, пока оно ЕЩЁ на экране, и отпускаем синтетический Return строго
     /// ПОСЛЕ замены (thenReturn в том же synth-задании) → приложение отправляет уже починенный
     /// текст. В редакторах то же: починка, затем перенос. Задержка Enter ≈ длина слова × 2.7мс +
-    /// 10мс — незаметно. Аварийный откат без релиза: defaults write com.keytamer.tamer enterPreConvert -bool NO.
+    /// 10мс — незаметно. Аварийный откат без релиза: defaults write ru.keyboop.app enterPreConvert -bool NO.
     /// Возвращает true, если Enter проглочен (уйдёт синтетикой).
     private func convertBeforeReturn(flags: CGEventFlags) -> Bool {
         guard Warm.isReady else { return false }   // см. Warm

@@ -21,13 +21,17 @@ protocol EventTapHandler: AnyObject {
     /// Человек выбрал сниппет цифрой в списке (задача 17). Текст вставляется как есть,
     /// удалять нечего: триггер никто не печатал.
     func handleSnippetPicked(_ text: String)
-    func handleVoiceBegin()
+    func handleVoiceBegin(override: Bool)
     func handleVoiceEnd()
     func handleTranslateHotkey()
     /// Смена регистра выделенного текста (задача 122).
     func handleCaseHotkey()
     /// Вставить текст последней диктовки туда, где сейчас каретка (задача 242).
     func handlePasteDictationHotkey()
+}
+
+extension EventTapHandler {
+    func handleVoiceBegin() { handleVoiceBegin(override: false) }
 }
 
 /// Глобальный наблюдатель клавиатуры (CGEventTap, АКТИВНЫЙ `.defaultTap` — нужен Accessibility,
@@ -127,6 +131,7 @@ final class EventTap {
     /// же, зачем `fnArmed` и `modkeyArmed`: в момент НАЖАТИЯ модификатор всегда выглядит одиночным,
     /// и отличить «тап по ⌥» от «начало аккорда ⌥⇧» можно только к моменту отпускания.
     private var voiceModArmed = false
+    private var voiceModArmedOverride = false
     private var voiceComboArmed = false             // комбинация модификаторов диктовки сейчас зажата целиком
     private var voiceKeyArmed = false
     private var lastVoiceToggle: TimeInterval = 0   // debounce toggle (не зависит от keyUp)
@@ -256,7 +261,7 @@ final class EventTap {
         // «события нам ещё носят». Это разные вещи по построению: порт может быть жив и пуст.
         //
         // ЧЕСТНО ПРО ИЗМЕРЕНИЕ (31.07). Проверяли на дев-сборке `tccutil reset Accessibility
-        // com.keytamer.tamer.dev`. Первый заход выглядел как подтверждение (после отзыва в логе ноль
+        // ru.keyboop.app.dev`. Первый заход выглядел как подтверждение (после отзыва в логе ноль
         // строк), но это оказалась ошибка чтения: человек в тот момент просто не печатал. Повторный
         // заход с набором показал ОБРАТНОЕ — через две минуты после отзыва тап продолжал получать
         // события и конверсия работала. То есть отзыв Accessibility НЕ убивает живой тап сразу,
@@ -626,7 +631,8 @@ final class EventTap {
             }
             // Voice hold-хоткей (диктовка) — перехватываем и ГЛОТАЕМ (вкл. autorepeat),
             // чтобы клавиша (⌥`) не печаталась во время записи.
-            if isVoiceHotkey(keyCode, event.flags) {
+            let vCheck = isVoiceHotkey(keyCode, event.flags)
+            if vCheck.matches {
                 // autorepeat зажатой клавиши НЕ должен дёргать toggle (иначе держишь хоткей чуть
                 // дольше → повтор делает СТОП сразу после старта → запись отменяется как короткая,
                 // «ничего не произошло» — баг 1-к-8). Реагируем только на ПЕРВОЕ нажатие.
@@ -635,11 +641,12 @@ final class EventTap {
                     if s.voiceHoldMode == "toggle" {
                         // Debounce по времени: надёжнее armed-флага (не застрянет, если keyUp потерян).
                         let now = CACurrentMediaTime()
-                        if now - lastVoiceToggle > 0.3 { lastVoiceToggle = now; toggleVoice() }
+                        if now - lastVoiceToggle > 0.3 { lastVoiceToggle = now; toggleVoice(override: vCheck.isOverride) }
                     } else if !voiceActive {
                         voiceActive = true
                         VoiceGate.set(true)          // синхронно: следующий тап сразу видит активность
-                        onMain { [weak self] in self?.handler?.handleVoiceBegin() }
+                        let isOver = vCheck.isOverride
+                        onMain { [weak self] in self?.handler?.handleVoiceBegin(override: isOver) }
                     }
                 }
                 return swallowDown(keyCode)   // глотаем ВСЕГДА (вкл. autorepeat) — чтобы клавиша не печаталась
@@ -978,9 +985,11 @@ final class EventTap {
         // отбрасывается существующим порогом, то есть в историю ничего не попадёт.
         if voiceActive, s.voiceHoldMode != "toggle", s.voiceHotkeyMode == "modkey" {
             let vm = relevantMods(CGEventFlags(rawValue: s.voiceHotkeyModifiers))
-            if !relevantMods(flags).subtracting(vm).isEmpty {
+            let overMod = relevantMods(overrideModifierMask())
+            let extra = relevantMods(flags).subtracting(vm)
+            if !extra.isEmpty && extra != overMod {
                 voiceActive = false; VoiceGate.set(false)
-                kbLog("voice: к удерживаемому модификатору добавили другой — это аккорд, запись обрываю")
+                kbLog("voice: к удерживаемому модификатору добавили посторонний — это аккорд, запись обрываю")
                 onMain { [weak self] in self?.handler?.handleVoiceEnd() }
             }
         }
@@ -988,35 +997,24 @@ final class EventTap {
         if s.voiceEnabled, s.voiceHotkeyMode == "modkey", keyCode == Int64(s.voiceHotkeyKeyCode) {
             let mask = CGEventFlags(rawValue: s.voiceHotkeyModifiers)
             let down = !flags.intersection(mask).isEmpty
-            // ⚠️ ОХРАННИК «ЧИСТОГО ТАПА» — ТОТ ЖЕ, ЧТО У КОНВЕРСИИ (репорт #17) И У МГНОВЕННОГО
-            // ПЕРЕКЛЮЧЕНИЯ (строки выше). Здесь его не было, и это худший класс дефекта из возможных
-            // для приложения, которое обещает, что наружу не уходит ничего: НА ЗАВОДСКИХ НАСТРОЙКАХ
-            // микрофон включался сам. Заводской хоткей конверсии это ⌥⇧, заводской хоткей диктовки
-            // это правый ⌥. Человек жмёт ⌥⇧ правым Option, попутно включается запись. Рекордер такой
-            // конфликт не ловит: он сравнивает combo с combo и не видит, что модификатор из combo
-            // совпал с одиночным модификатором другой функции. Найдено аудитом умолчаний 04.08.2026.
-            //
-            // Асимметрия намеренная: СТАРТ требует чистого тапа, ОСТАНОВКА не требует. Залипшая
-            // запись с включённым микрофоном хуже, чем незапустившаяся: первое человек может не
-            // заметить, второе он замечает сразу и жмёт ещё раз.
-            let soloVoiceTap = relevantMods(flags).subtracting(relevantMods(mask)).isEmpty
+            let vm = relevantMods(mask)
+            let overMod = relevantMods(overrideModifierMask())
+            let extra = relevantMods(flags).subtracting(vm)
+            let soloVoiceTap = extra.isEmpty
+            let overrideVoiceTap = (extra == overMod)
             if s.voiceHoldMode == "toggle" {
-                // ВЗВОД НА НАЖАТИИ, ВЫСТРЕЛ НА ОТПУСКАНИИ — единственный способ отличить тап от
-                // аккорда. Проверять «одиночный ли модификатор» в момент нажатия бесполезно: ⌥ в
-                // аккорде ⌥⇧ нажимается ПЕРВЫМ и в этот миг ничем не отличается от чистого тапа
-                // (проверено опытом 04.08.2026, первая версия правки от этого и не работала).
-                // Взвод снимается там же, где у соседних жестов: обычная клавиша, второй модификатор,
-                // Secure Input.
                 if down {
-                    voiceModArmed = soloVoiceTap
+                    voiceModArmed = soloVoiceTap || overrideVoiceTap
+                    voiceModArmedOverride = overrideVoiceTap
                 } else if voiceModArmed {
                     voiceModArmed = false
-                    toggleVoice()
+                    toggleVoice(override: voiceModArmedOverride)
                 }
             } else {
-                if down && !voiceActive && soloVoiceTap {
+                if down && !voiceActive && (soloVoiceTap || overrideVoiceTap) {
                     voiceActive = true; VoiceGate.set(true)
-                    onMain { [weak self] in self?.handler?.handleVoiceBegin() }
+                    let isOver = overrideVoiceTap
+                    onMain { [weak self] in self?.handler?.handleVoiceBegin(override: isOver) }
                 } else if !down && voiceActive {
                     voiceActive = false; VoiceGate.set(false)
                     onMain { [weak self] in self?.handler?.handleVoiceEnd() }
@@ -1195,24 +1193,37 @@ final class EventTap {
         toggleVoice()
     }
 
-    private func toggleVoice() {
+    private func overrideModifierMask() -> CGEventFlags {
+        switch AppSettings.shared.voiceOverrideModifier {
+        case "control": return .maskControl
+        case "shift":   return .maskShift
+        case "option":  return .maskAlternate
+        default:        return .maskCommand
+        }
+    }
+
+    private func toggleVoice(override: Bool = false) {
         // Решение start/stop — СИНХРОННОЕ и атомарное (VoiceGate.flip), иначе быстрый второй тап
         // видел устаревшее состояние: «нажал — ничего, нажал ещё — пошло» (баг 1-к-8, 09.06).
         // А сами begin/end тянут аудио-teardown, NSSound и RMS-свёртку — их на main (см. VoiceGate).
         let wasActive = VoiceGate.flip()
         if wasActive { onMain { [weak self] in self?.handler?.handleVoiceEnd() } }
-        else         { onMain { [weak self] in self?.handler?.handleVoiceBegin() } }
+        else         { onMain { [weak self] in self?.handler?.handleVoiceBegin(override: override) } }
         voiceActive = !wasActive
     }
 
     /// Совпадает ли событие с voice-хоткеем диктовки (клавиша + модификаторы).
-    private func isVoiceHotkey(_ keyCode: Int64, _ flags: CGEventFlags) -> Bool {
+    private func isVoiceHotkey(_ keyCode: Int64, _ flags: CGEventFlags) -> (matches: Bool, isOverride: Bool) {
         let s = AppSettings.shared
         // keyDown-путь — только для режима "key" (клавиша+модификаторы, напр. ⌥`).
-        guard s.voiceEnabled, s.voiceHotkeyMode == "key", keyMatches(keyCode, s.voiceHotkeyKeyCode) else { return false }
+        guard s.voiceEnabled, s.voiceHotkeyMode == "key", keyMatches(keyCode, s.voiceHotkeyKeyCode) else { return (false, false) }
         let want = relevantMods(CGEventFlags(rawValue: s.voiceHotkeyModifiers))
-        guard !want.isEmpty else { return false }
-        return relevantMods(flags) == want
+        guard !want.isEmpty else { return (false, false) }
+        let current = relevantMods(flags)
+        if current == want { return (true, false) }
+        let overMod = relevantMods(overrideModifierMask())
+        if current == want.union(overMod) { return (true, true) }
+        return (false, false)
     }
 
     /// Совпадение keyCode хоткея с учётом РАЗНЫХ клавиатур. Грейв-клавиша (`` ` ``/`~`) имеет разный keyCode

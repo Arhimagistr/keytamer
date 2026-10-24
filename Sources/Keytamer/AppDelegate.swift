@@ -93,13 +93,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var welcomePending = false
     private var singleInstanceFD: Int32 = -1   // держим fd открытым → flock жив до выхода процесса
     /// Кросс-процессный сигнал «открой Настройки»: вторая копия (двойной клик по уже запущенному
-    /// Keyboop, если Launch Services всё же породил процесс) шлёт его работающему экземпляру и выходит.
+    /// Keytamer, если Launch Services всё же породил процесс) шлёт его работающему экземпляру и выходит.
     static let openSettingsNotification = Notification.Name("com.keytamer.tamer.openSettings")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // SINGLE-INSTANCE: две копии Keyboop = два CGEventTap'а = каждое нажатие чинится ДВАЖДЫ
-        // (дубли префиксов, латинские огрызки — прецедент 19.06.2026: dev `com.keytamer.tamer.dev` рядом с
-        // прод `com.keytamer.tamer`). Замок КРОСС-БАНДЛОВЫЙ (flock по фикс-пути), иначе разные bundle id
+        // (дубли префиксов, латинские огрызки — прецедент 19.06.2026: dev `ru.keyboop.app.dev` рядом с
+        // прод `ru.keyboop.app`). Замок КРОСС-БАНДЛОВЫЙ (flock по фикс-пути), иначе разные bundle id
         // расходятся. Если занят другим Keyboop — мы вторая копия: тихо уходим ДО установки тапа.
         guard acquireSingleInstanceLock() else {
             if ResourceGuardSingletonFailurePolicy.action(
@@ -1149,7 +1149,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// отпустит замок — даём ~2с освободиться, иначе ложно решим «уже запущен».
     private func acquireSingleInstanceLock() -> Bool {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Keyboop", isDirectory: true)
+            .appendingPathComponent("Keytamer", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let path = dir.appendingPathComponent("singleton.lock").path
         let fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0o600)

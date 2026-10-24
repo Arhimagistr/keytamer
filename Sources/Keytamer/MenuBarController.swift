@@ -147,41 +147,40 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         return img
     }()
 
-    /// Кэш и генератор инвертированных плашек языка распознавания («RU» / «EN»):
-    /// белый/светлый фон и вырезанные черные/прозрачные буквы внутри.
-    private static var badgeCache: [String: NSImage] = [:]
-    static func badgeImage(text: String) -> NSImage {
-        if let cached = badgeCache[text] { return cached }
-        let W: CGFloat = 26, H: CGFloat = 18
-        let badgeW: CGFloat = 25, badgeH: CGFloat = 14
-        let img = NSImage(size: NSSize(width: W, height: H), flipped: false) { rect in
-            guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
-            let badgeRect = NSRect(x: (W - badgeW) / 2, y: (H - badgeH) / 2, width: badgeW, height: badgeH)
+    /// Кэш и генератор полупрозрачных прямоугольных подложек под текст языка («Ru» / «En»):
+    /// сохраняет привычный шрифт и регистр текста, добавляя аккуратный полупрозрачный фон.
+    private static var plateCache: [String: NSImage] = [:]
+    static func badgeWithPlate(text: String) -> NSImage {
+        if let cached = plateCache[text] { return cached }
+        let font = NSFont.menuBarFont(ofSize: 0)
+        let str = text as NSString
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: NSColor.black
+        ]
+        let textSize = str.size(withAttributes: attrs)
+        let padX: CGFloat = 5
+        let w = max(24, ceil(textSize.width) + padX * 2)
+        let h: CGFloat = 18
+        let badgeH: CGFloat = 16
+        let img = NSImage(size: NSSize(width: w, height: h), flipped: false) { rect in
+            let badgeRect = NSRect(x: 0.5, y: (h - badgeH) / 2, width: w - 1, height: badgeH)
             let path = NSBezierPath(roundedRect: badgeRect, xRadius: 3.5, yRadius: 3.5)
-            NSColor.black.setFill()
+            // Прямоугольная подложка того же цвета, но с большей прозрачностью (~22%)
+            NSColor(white: 0.0, alpha: 0.22).setFill()
             path.fill()
 
-            ctx.saveGState()
-            ctx.setBlendMode(.destinationOut)
-            let font = NSFont.systemFont(ofSize: 10, weight: .heavy)
-            let str = text.uppercased() as NSString
-            let attrs: [NSAttributedString.Key: Any] = [
-                .font: font,
-                .foregroundColor: NSColor.black
-            ]
-            let textSize = str.size(withAttributes: attrs)
             let textRect = NSRect(
-                x: badgeRect.minX + (badgeW - textSize.width) / 2,
-                y: badgeRect.minY + (badgeH - textSize.height) / 2 + 0.5,
+                x: (w - textSize.width) / 2,
+                y: (h - textSize.height) / 2 + 0.5,
                 width: textSize.width,
                 height: textSize.height
             )
             str.draw(in: textRect, withAttributes: attrs)
-            ctx.restoreGState()
             return true
         }
         img.isTemplate = true
-        badgeCache[text] = img
+        plateCache[text] = img
         return img
     }
 
@@ -286,10 +285,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         guard statusItem.isVisible, voiceState == .idle, let button = statusItem.button else { return }
 
         if voiceLang == "ru" {
-            button.image = Self.badgeImage(text: "RU")
+            button.image = Self.badgeWithPlate(text: "Ru")
             button.imagePosition = .imageOnly
         } else if voiceLang == "en" {
-            button.image = Self.badgeImage(text: "EN")
+            button.image = Self.badgeWithPlate(text: "En")
             button.imagePosition = .imageOnly
         } else {
             switch style {
@@ -337,12 +336,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         let code = layout.currentCodeLive()
         let voiceLang = settings.voiceLanguage
         if voiceLang == "ru" {
-            if button.image !== Self.badgeImage(text: "RU") {
-                button.image = Self.badgeImage(text: "RU")
+            if button.image !== Self.badgeWithPlate(text: "Ru") {
+                button.image = Self.badgeWithPlate(text: "Ru")
             }
         } else if voiceLang == "en" {
-            if button.image !== Self.badgeImage(text: "EN") {
-                button.image = Self.badgeImage(text: "EN")
+            if button.image !== Self.badgeWithPlate(text: "En") {
+                button.image = Self.badgeWithPlate(text: "En")
             }
         } else if settings.menuBarStyle == "flag", code != lastFlagLang {
             lastFlagLang = code
@@ -629,6 +628,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
         settings.voiceLanguage = next
         applyIconStyle()
+        NSSound(named: "Tink")?.play()
         VoiceIndicator.shared.showToast(L10n.t(toastKey))
     }
 
@@ -965,6 +965,14 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         item.image = icon("globe")
         let sub = NSMenu()
 
+        // Самый верхний пункт — тумблер привязки к раскладке клавиатуры
+        let followItem = NSMenuItem(title: L10n.t("voice.followLayout"), action: #selector(toggleFollowLayoutMenu(_:)), keyEquivalent: "")
+        followItem.target = self
+        followItem.state = settings.voiceFollowLayout ? .on : .off
+        sub.addItem(followItem)
+
+        sub.addItem(.separator())
+
         let autoItem = NSMenuItem(title: L10n.t("voice.langAuto"), action: #selector(selectVoiceLangMenu(_:)), keyEquivalent: "")
         autoItem.target = self; autoItem.representedObject = "auto"
         autoItem.state = (cur == "auto") ? .on : .off
@@ -984,10 +992,17 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         return item
     }
 
+    @objc private func toggleFollowLayoutMenu(_ sender: NSMenuItem) {
+        settings.voiceFollowLayout.toggle()
+        sender.state = settings.voiceFollowLayout ? .on : .off
+        NSSound(named: "Tink")?.play()
+    }
+
     @objc private func selectVoiceLangMenu(_ sender: NSMenuItem) {
         guard let lang = sender.representedObject as? String else { return }
         settings.voiceLanguage = lang
         applyIconStyle()
+        NSSound(named: "Tink")?.play()
         let toastKey: String
         switch lang {
         case "ru": toastKey = "voice.langToastRU"

@@ -11,7 +11,9 @@ final class VoiceController {
     private var whisper: WhisperBridge?
     private var starting = false   // begin() уже запустил async-старт — не запускать второй (гонка)
     private var abortStart = false // end()/cancel() пришёл во время async-старта → прервать его
-    /// Скрипт раскладки в момент начала диктовки: при voiceLanguage == "auto" определяет целевой язык (en / ru)
+    /// Флаг оверрайда языка текущей сессии записи (зажата клавиша оверрайда)
+    private var isOverrideDictation = false
+    /// Скрипт раскладки в момент начала диктовки: при voiceLanguage == "auto" и voiceFollowLayout определяет целевой язык (en / ru)
     private var dictationScript: LayoutManager.Script = .latin
     /// СИНХРОННЫЙ флаг намерения: true с момента begin() и до остановки записи. Источник истины
     /// для toggle (EventTap), т.к. begin() асинхронный и recorder.isRecording в момент toggle ещё false.
@@ -196,8 +198,14 @@ final class VoiceController {
     // MARK: - Модель
 
     static var modelsDir: URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Keytamer/models", isDirectory: true)
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let base = appSupport.appendingPathComponent("Keytamer/models", isDirectory: true)
+        if !FileManager.default.fileExists(atPath: base.path) {
+            let legacy = appSupport.appendingPathComponent("Keyboop/models", isDirectory: true)
+            if FileManager.default.fileExists(atPath: legacy.path) {
+                return legacy
+            }
+        }
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         return base
     }
@@ -217,28 +225,15 @@ final class VoiceController {
 
     /// Зажали хоткей диктовки. ВАЖНО: НЕ блокируем по «идёт транскрипция прошлого клипа» — запись и
     /// whisper независимы (баг «не сработало с первого раза»: новую запись глушил busy предыдущей).
-    func begin() {
+    func begin(override: Bool = false) {
         guard settings.voiceEnabled else { return }
         if starting { kbLog("voice: begin пропущен — старт уже идёт"); return }
         if recorder.isRecording { kbLog("voice: begin пропущен — запись уже идёт"); return }
         VoiceGate.set(true)            // СИНХРОННО: намерение записывать — toggle сразу видит активность
         starting = true
         abortStart = false
-        let autoLayout = settings.voiceAutoSwitchLayout
-        if autoLayout != "off" {
-            if autoLayout == "ru" {
-                layout.selectLayout(cyrillic: true)
-                dictationScript = .cyrillic
-            } else if autoLayout == "en" {
-                layout.selectLayout(cyrillic: false)
-                dictationScript = .latin
-            } else {
-                layout.selectSource(id: autoLayout)
-                dictationScript = layout.currentScript()
-            }
-        } else {
-            dictationScript = layout.currentScript()
-        }
+        isOverrideDictation = override
+        dictationScript = layout.currentScript()
         lastVoiceUseAt = Date()        // маркер «пользователь диктует» для анти-карусели pressure-выгрузки
         Task { @MainActor in
             defer { starting = false }
@@ -708,9 +703,9 @@ final class VoiceController {
     var isRecording: Bool { recorder.isRecording }
     /// Запись по кнопке (toggle): не активна → старт; активна → стоп. Опирается на isActive
     /// (синхронный), а не isRecording — иначе быстрый второй тап во время async-старта рассинхронит.
-    func toggleRecording() {
+    func toggleRecording(override: Bool = false) {
         if isActive { kbLog("voice: toggle → СТОП"); end() }
-        else { kbLog("voice: toggle → СТАРТ"); begin() }
+        else { kbLog("voice: toggle → СТАРТ (override=\(override))"); begin(override: override) }
     }
 
     /// ФАЙЛ-МАРКЕР «ИДЁТ ДИКТОВКА» — для того, кто снаружи собирается нас прибить.
@@ -722,7 +717,7 @@ final class VoiceController {
     /// паузу после вставки текста, иначе перезапуск придётся ровно на момент, когда человек
     /// дочитывает вставленное и может докиктовать следом.
     static let busyMarker = URL(fileURLWithPath: NSHomeDirectory())
-        .appendingPathComponent("Library/Application Support/Keytamer/voice-busy")
+        .appendingPathComponent("Library/Application Support/Keyboop/voice-busy")
 
     private func markBusy(_ busy: Bool) {
         let url = Self.busyMarker
@@ -776,7 +771,7 @@ final class VoiceController {
     /// сюрпризов, какой может выдать программа, живущая в чужой клавиатуре. Поэтому включение
     /// живёт только в настройках по имени ключа и в интерфейсе не показывается:
     ///
-    ///     defaults write com.keytamer.tamer voiceSendGesture -bool true
+    ///     defaults write ru.keyboop.app voiceSendGesture -bool true
     ///
     /// Второе условие — диктовка должна висеть на УДЕРЖАНИИ модификатора. При «нажал-сказал-нажал»
     /// момента «отпускания с дожатым ⌘» просто не существует, и жест был бы случайным.
@@ -1004,17 +999,27 @@ final class VoiceController {
         }
     }
 
-    /// Язык для whisper/parakeet: если в настройках "auto", язык определяется по скрипту раскладки
-    /// (en для латиницы, ru для кириллицы). Если в настройках задан конкретный язык ("ru"/"en"), используется он.
+    /// Язык для whisper/parakeet:
+    /// 1. Если активен оверрайд (isOverrideDictation) -> settings.voiceOverrideLanguage
+    /// 2. Если в настройках явно задан конкретный язык ("ru"/"en") -> используется он
+    /// 3. Если "auto": при включенном voiceFollowLayout -> определяется по скрипту раскладки (.latin -> "en", .cyrillic -> "ru");
+    ///    при выключенном -> "auto" (чистый акустический автодетект).
     private func languageForWhisper() -> String {
+        if isOverrideDictation {
+            return settings.voiceOverrideLanguage
+        }
         let lang = settings.voiceLanguage
         if lang == "auto" {
-            switch dictationScript {
-            case .latin:
-                return "en"
-            case .cyrillic:
-                return "ru"
-            case .other:
+            if settings.voiceFollowLayout {
+                switch dictationScript {
+                case .latin:
+                    return "en"
+                case .cyrillic:
+                    return "ru"
+                case .other:
+                    return "auto"
+                }
+            } else {
                 return "auto"
             }
         }

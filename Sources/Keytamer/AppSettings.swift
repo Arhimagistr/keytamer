@@ -96,7 +96,7 @@ final class AppSettings {
             Key.triggerTab: false,
             // Enter-pre: чинить слово ДО пропуска Enter в приложение — иначе чат отправляет
             // неисправленное, а замена печатается в уже пустое поле (репорт 11.07). Скрытый
-            // аварийный рубильник без UI: defaults write com.keytamer.tamer enterPreConvert -bool NO.
+            // аварийный рубильник без UI: defaults write ru.keyboop.app enterPreConvert -bool NO.
             "enterPreConvert": true,
             Key.arrowsCancel: true,
             "voiceSoundEnabled": true,
@@ -147,7 +147,7 @@ final class AppSettings {
 
     /// INLINE-починка: замена слова ПРЯМО в колбэке тапа (гонка закрыта по построению, 25.07).
     /// Аварийный рубильник без UI — если у кого-то приложение плохо принимает быструю синтетику:
-    /// defaults write com.keytamer.tamer inlineLiveFix -bool NO  → вернётся прежний асинхронный путь.
+    /// defaults write ru.keyboop.app inlineLiveFix -bool NO  → вернётся прежний асинхронный путь.
     var inlineLiveFix: Bool {
         get { d.object(forKey: "inlineLiveFix") == nil ? true : d.bool(forKey: "inlineLiveFix") }
         set { d.set(newValue, forKey: "inlineLiveFix") }
@@ -511,7 +511,7 @@ final class AppSettings {
         }
         set { d.set(newValue, forKey: "voiceHistoryMinutes") }
     }
-    /// Имя модели whisper (файл ggml-<model>.bin в ~/Library/Application Support/Keytamer/models).
+    /// Имя модели whisper (файл ggml-<model>.bin в ~/Library/Application Support/Keyboop/models).
     /// small — баланс качества RU/пунктуации и скорости (research: ≥ small для стабильной пунктуации).
     var voiceModel: String { get { d.string(forKey: "voiceModel") ?? "small" } set { d.set(newValue, forKey: "voiceModel") } }
     /// UID выбранного микрофона ("" = системный по умолчанию).
@@ -524,10 +524,24 @@ final class AppSettings {
         set { d.set(newValue, forKey: "voiceLanguage") }
     }
 
-    /// Автоматическое переключение раскладки перед записью голоса: "off", "ru", "en" или ID конкретного источника.
-    var voiceAutoSwitchLayout: String {
-        get { d.string(forKey: "voiceAutoSwitchLayout") ?? "off" }
-        set { d.set(newValue, forKey: "voiceAutoSwitchLayout") }
+    /// Привязывать язык диктовки к активной раскладке клавиатуры при voiceLanguage == "auto".
+    /// По умолчанию true: если раскладка русская — распознаем как ru, если английская — как en.
+    /// Если выключено — чистый нативный акустический автодетект модели.
+    var voiceFollowLayout: Bool {
+        get { (d.object(forKey: "voiceFollowLayout") as? Bool) ?? true }
+        set { d.set(newValue, forKey: "voiceFollowLayout") }
+    }
+
+    /// Клавиша-модификатор для временного оверрайда языка диктовки: "command", "control", "shift", "option".
+    var voiceOverrideModifier: String {
+        get { d.string(forKey: "voiceOverrideModifier") ?? "command" }
+        set { d.set(newValue, forKey: "voiceOverrideModifier") }
+    }
+
+    /// Язык для временного оверрайда при зажатой клавише оверрайда: "en", "ru", … По умолчанию "en".
+    var voiceOverrideLanguage: String {
+        get { d.string(forKey: "voiceOverrideLanguage") ?? "en" }
+        set { d.set(newValue, forKey: "voiceOverrideLanguage") }
     }
 
     /// Экспериментально: конвертировать несколько слов группой по хоткею (выключено по умолчанию).

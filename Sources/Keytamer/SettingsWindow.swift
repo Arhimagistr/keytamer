@@ -2076,8 +2076,9 @@ final class DetailVC: NSViewController {
     private func runningAppsPopup() -> NSView {
         let pop = NSPopUpButton(); pop.controlSize = .regular
         pop.addItem(withTitle: L10n.t("exc.fromRunning"))
+        let myId = Bundle.main.bundleIdentifier ?? "com.keytamer.tamer"
         let apps = NSWorkspace.shared.runningApplications
-            .filter { $0.activationPolicy == .regular && $0.bundleIdentifier != nil && $0.bundleIdentifier != "com.keytamer.tamer" }
+            .filter { $0.activationPolicy == .regular && $0.bundleIdentifier != nil && $0.bundleIdentifier != myId && $0.bundleIdentifier != "ru.keyboop.app" }
             .sorted { ($0.localizedName ?? "") < ($1.localizedName ?? "") }
         runningAppsList = apps.compactMap { $0.bundleIdentifier }
         for a in apps { pop.addItem(withTitle: a.localizedName ?? (a.bundleIdentifier ?? "?")) }
@@ -3523,8 +3524,9 @@ final class DetailVC: NSViewController {
                 // было неоткуда. Подпись однострочная и усекается (settingRow), длинное объяснение — в help.
                 controlRow(L10n.t("voice.lang"), voiceLangControl(),
                            subtitle: L10n.t("voice.langSub"), help: L10n.t("voice.langHelp"), key: "voice.lang"),
-                controlRow(L10n.t("voice.autoSwitchLayout"), voiceAutoSwitchLayoutControl(),
-                           subtitle: L10n.t("voice.autoSwitchLayoutSub"), help: L10n.t("voice.autoSwitchLayoutHelp"), key: "voice.autoSwitchLayout"),
+                switchRow(L10n.t("voice.followLayout"), L10n.t("voice.followLayoutSub"), settings.voiceFollowLayout, #selector(toggleFollowLayout), help: L10n.t("voice.followLayoutHelp"), key: "voice.followLayout"),
+                controlRow(L10n.t("voice.overrideMod"), voiceOverrideModifierControl(), subtitle: L10n.t("voice.overrideModSub"), key: "voice.overrideMod"),
+                controlRow(L10n.t("voice.overrideLang"), voiceOverrideLangControl(), key: "voice.overrideLang"),
             ]),
             group(6),
             // ⚠️ ПОДЗАГОЛОВОК ВПЛОТНУЮ К СВОЕЙ КАРТОЧКЕ, БЕЗ ПРОКЛАДКИ (автор 24.09.2026). Здесь после
@@ -4193,6 +4195,7 @@ final class DetailVC: NSViewController {
     private weak var clipboardThresholdBox: CollapsibleRow?
     private weak var clipboardPopUp: NSPopUpButton?
     private weak var clipboardCustomField: NSTextField?
+    private weak var clipboardCharsUnit: NSTextField?
     private static let clipboardThresholdPresets: [(String, Int)] = [
         ("voice.clipboardThreshAll", 0),
         ("voice.clipboardThresh30", 30),
@@ -4211,10 +4214,12 @@ final class DetailVC: NSViewController {
         pop.action = #selector(clipboardThresholdChanged(_:))
         clipboardPopUp = pop
 
+        let isAll = (cur == 0)
         let field = NSTextField(frame: .zero)
         field.font = .systemFont(ofSize: 12)
         field.alignment = .center
-        field.stringValue = "\(cur)"
+        field.stringValue = isAll ? "—" : "\(cur)"
+        field.isEnabled = !isAll
         field.target = self
         field.action = #selector(clipboardCustomFieldChanged(_:))
         field.widthAnchor.constraint(equalToConstant: 48).isActive = true
@@ -4223,6 +4228,8 @@ final class DetailVC: NSViewController {
         let unit = NSTextField(labelWithString: L10n.t("voice.charsUnit"))
         unit.font = .systemFont(ofSize: 12)
         unit.textColor = .secondaryLabelColor
+        unit.isHidden = isAll
+        clipboardCharsUnit = unit
 
         let stack = NSStackView(views: [pop, field, unit])
         stack.orientation = .horizontal
@@ -4235,15 +4242,29 @@ final class DetailVC: NSViewController {
         let idx = p.indexOfSelectedItem
         guard idx >= 0, idx < Self.clipboardThresholdPresets.count else { return }
         let val = Self.clipboardThresholdPresets[idx].1
-        if val >= 0 {
+        if val == 0 {
+            settings.voiceClipboardThreshold = 0
+            clipboardCustomField?.stringValue = "—"
+            clipboardCustomField?.isEnabled = false
+            clipboardCharsUnit?.isHidden = true
+        } else if val > 0 {
             settings.voiceClipboardThreshold = val
             clipboardCustomField?.stringValue = "\(val)"
+            clipboardCustomField?.isEnabled = true
+            clipboardCharsUnit?.isHidden = false
+        } else {
+            let cur = max(1, settings.voiceClipboardThreshold)
+            settings.voiceClipboardThreshold = cur
+            clipboardCustomField?.stringValue = "\(cur)"
+            clipboardCustomField?.isEnabled = true
+            clipboardCharsUnit?.isHidden = false
+            clipboardCustomField?.selectText(nil)
         }
     }
 
     @objc private func clipboardCustomFieldChanged(_ f: NSTextField) {
         let text = f.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let num = Int(text), num >= 0 {
+        if let num = Int(text), num > 0 {
             let clamped = min(num, 10_000)
             f.stringValue = "\(clamped)"
             settings.voiceClipboardThreshold = clamped
@@ -4253,7 +4274,7 @@ final class DetailVC: NSViewController {
                 clipboardPopUp?.selectItem(at: 4) // "Свой порог…"
             }
         } else {
-            f.stringValue = "\(settings.voiceClipboardThreshold)"
+            f.stringValue = settings.voiceClipboardThreshold > 0 ? "\(settings.voiceClipboardThreshold)" : "—"
         }
     }
 
@@ -4358,32 +4379,41 @@ final class DetailVC: NSViewController {
         }
     }
 
-    private var voiceAutoSwitchCodes: [String] = []
-    private func voiceAutoSwitchLayoutControl() -> NSView {
-        let pop = NSPopUpButton()
-        voiceAutoSwitchCodes = ["off", "ru", "en"]
-        pop.addItem(withTitle: L10n.t("voice.autoSwitchOff"))
-        pop.addItem(withTitle: L10n.t("voice.autoSwitchRU"))
-        pop.addItem(withTitle: L10n.t("voice.autoSwitchEN"))
+    @objc private func toggleFollowLayout(_ s: NSSwitch) {
+        settings.voiceFollowLayout = (s.state == .on)
+    }
 
-        let extraLayouts = LayoutManager.availableLayouts()
-        for l in extraLayouts {
-            if !l.isCyrillic && !l.languageCode.hasPrefix("en") && !l.id.contains("Russian") && !l.id.contains("ABC") && !l.id.contains("US") {
-                pop.addItem(withTitle: "\(l.localizedName) (\(l.languageCode.uppercased()))")
-                voiceAutoSwitchCodes.append(l.id)
-            }
-        }
-        let cur = settings.voiceAutoSwitchLayout
-        let idx = voiceAutoSwitchCodes.firstIndex(of: cur) ?? 0
+    private let overrideModCodes = ["command", "control", "shift", "option"]
+    private func voiceOverrideModifierControl() -> NSView {
+        let pop = NSPopUpButton()
+        pop.addItems(withTitles: ["Command (⌘)", "Control (⌃)", "Shift (⇧)", "Option (⌥)"])
+        let idx = overrideModCodes.firstIndex(of: settings.voiceOverrideModifier) ?? 0
         pop.selectItem(at: idx)
         pop.target = self
-        pop.action = #selector(voiceAutoSwitchLayoutChanged(_:))
+        pop.action = #selector(voiceOverrideModifierChanged(_:))
         return pop
     }
-    @objc private func voiceAutoSwitchLayoutChanged(_ s: NSPopUpButton) {
+    @objc private func voiceOverrideModifierChanged(_ s: NSPopUpButton) {
         let i = s.indexOfSelectedItem
-        if i >= 0, i < voiceAutoSwitchCodes.count {
-            settings.voiceAutoSwitchLayout = voiceAutoSwitchCodes[i]
+        if i >= 0, i < overrideModCodes.count {
+            settings.voiceOverrideModifier = overrideModCodes[i]
+        }
+    }
+
+    private let overrideLangCodes = ["en", "ru"]
+    private func voiceOverrideLangControl() -> NSView {
+        let pop = NSPopUpButton()
+        pop.addItems(withTitles: ["English (EN)", "Русский (RU)"])
+        let idx = overrideLangCodes.firstIndex(of: settings.voiceOverrideLanguage) ?? 0
+        pop.selectItem(at: idx)
+        pop.target = self
+        pop.action = #selector(voiceOverrideLangChanged(_:))
+        return pop
+    }
+    @objc private func voiceOverrideLangChanged(_ s: NSPopUpButton) {
+        let i = s.indexOfSelectedItem
+        if i >= 0, i < overrideLangCodes.count {
+            settings.voiceOverrideLanguage = overrideLangCodes[i]
         }
     }
 
