@@ -147,6 +147,44 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         return img
     }()
 
+    /// Кэш и генератор инвертированных плашек языка распознавания («RU» / «EN»):
+    /// белый/светлый фон и вырезанные черные/прозрачные буквы внутри.
+    private static var badgeCache: [String: NSImage] = [:]
+    static func badgeImage(text: String) -> NSImage {
+        if let cached = badgeCache[text] { return cached }
+        let W: CGFloat = 26, H: CGFloat = 18
+        let badgeW: CGFloat = 25, badgeH: CGFloat = 14
+        let img = NSImage(size: NSSize(width: W, height: H), flipped: false) { rect in
+            guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
+            let badgeRect = NSRect(x: (W - badgeW) / 2, y: (H - badgeH) / 2, width: badgeW, height: badgeH)
+            let path = NSBezierPath(roundedRect: badgeRect, xRadius: 3.5, yRadius: 3.5)
+            NSColor.black.setFill()
+            path.fill()
+
+            ctx.saveGState()
+            ctx.setBlendMode(.destinationOut)
+            let font = NSFont.systemFont(ofSize: 10, weight: .heavy)
+            let str = text.uppercased() as NSString
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: NSColor.black
+            ]
+            let textSize = str.size(withAttributes: attrs)
+            let textRect = NSRect(
+                x: badgeRect.minX + (badgeW - textSize.width) / 2,
+                y: badgeRect.minY + (badgeH - textSize.height) / 2 + 0.5,
+                width: textSize.width,
+                height: textSize.height
+            )
+            str.draw(in: textRect, withAttributes: attrs)
+            ctx.restoreGState()
+            return true
+        }
+        img.isTemplate = true
+        badgeCache[text] = img
+        return img
+    }
+
     /// ФЛАГ ЯЗЫКА в строке меню — как когда-то в Punto Switcher (просьба пользователей 25.07).
     ///
     /// Берём СИСТЕМНЫЙ эмодзи-флаг. Пробовали рисовать плоские флаги вектором — американский вышел
@@ -242,24 +280,34 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     func applyIconStyle() {
         let style = settings.menuBarStyle
         let showLang = settings.menuBarShowLanguage
+        let voiceLang = settings.voiceLanguage
         // Пункт исчезает из строки меню, только если НЕТ и значка, и языка.
         statusItem.isVisible = !(style == "hidden" && !showLang)
         guard statusItem.isVisible, voiceState == .idle, let button = statusItem.button else { return }
-        switch style {
-        case "brand":
-            button.image = Self.brandStatusImage ?? NSImage(systemSymbolName: "keyboard", accessibilityDescription: "Keytamer")
-            button.imagePosition = .imageLeading
-        case "flag":
-            let lang = layout.currentCodeLive()
-            button.image = flagOrKeyboard(lang)
-            button.imagePosition = .imageLeading
-            lastFlagLang = lang
-        case "hidden":
-            button.image = nil
-            button.imagePosition = .noImage       // значка нет — остаётся только язык (см. updateTitle)
-        default:   // "keyboard"
-            button.image = NSImage(systemSymbolName: "keyboard", accessibilityDescription: "Keytamer")
-            button.imagePosition = .imageLeading
+
+        if voiceLang == "ru" {
+            button.image = Self.badgeImage(text: "RU")
+            button.imagePosition = .imageOnly
+        } else if voiceLang == "en" {
+            button.image = Self.badgeImage(text: "EN")
+            button.imagePosition = .imageOnly
+        } else {
+            switch style {
+            case "brand":
+                button.image = Self.brandStatusImage ?? NSImage(systemSymbolName: "keyboard", accessibilityDescription: "Keytamer")
+                button.imagePosition = .imageLeading
+            case "flag":
+                let lang = layout.currentCodeLive()
+                button.image = flagOrKeyboard(lang)
+                button.imagePosition = .imageLeading
+                lastFlagLang = lang
+            case "hidden":
+                button.image = nil
+                button.imagePosition = .noImage       // значка нет — остаётся только язык (см. updateTitle)
+            default:   // "keyboard"
+                button.image = NSImage(systemSymbolName: "keyboard", accessibilityDescription: "Keytamer")
+                button.imagePosition = .imageLeading
+            }
         }
         updateTitle()
     }
@@ -287,9 +335,16 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         // currentCodeLive, а НЕ currentCode: в фоновом агенте чтение TIS не следует за внешними
         // переключениями раскладки (замер 25.07 — см. LayoutManager.currentCodeLive).
         let code = layout.currentCodeLive()
-        // Флаг должен следовать за раскладкой, а единственный живой сигнал о её смене здесь —
-        // опрос из startPolling. Картинку меняем только когда язык реально другой.
-        if settings.menuBarStyle == "flag", code != lastFlagLang {
+        let voiceLang = settings.voiceLanguage
+        if voiceLang == "ru" {
+            if button.image !== Self.badgeImage(text: "RU") {
+                button.image = Self.badgeImage(text: "RU")
+            }
+        } else if voiceLang == "en" {
+            if button.image !== Self.badgeImage(text: "EN") {
+                button.image = Self.badgeImage(text: "EN")
+            }
+        } else if settings.menuBarStyle == "flag", code != lastFlagLang {
             lastFlagLang = code
             button.image = flagOrKeyboard(code)
         }
@@ -298,10 +353,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         // `button.title = " ⚠︎"` вместо кода раскладки: человек, у которого в строке меню только
         // язык и есть, терял его целиком и получал вместо диагноза вторую поломку. И появлялся знак
         // только на доступах, тогда как молчать мы умеем ещё тремя способами.
-        let lang = settings.menuBarShowLanguage ? code : ""
+        let lang = (settings.menuBarShowLanguage && voiceLang == "auto") ? code : ""
         let mark = (needsPermission || AppHealth.iconDimmed(health)) ? "⚠︎" : ""
         let parts = [lang, mark].filter { !$0.isEmpty }
-        let bare = settings.menuBarStyle == "hidden"
+        let bare = (settings.menuBarStyle == "hidden" && voiceLang == "auto")
         if callRecording {
             // Красный кружок рядом со значком (задача 230): запись звонка нельзя забыть. Цвет тут
             // допустим, потому что подсказка значка говорит то же самое словами.
@@ -541,6 +596,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     /// то, чему чужой фокус не нужен: копирование, пауза, диктовка и окно истории.
     private func runQuickAction() {
         switch settings.quickAction {
+        case "switchVoiceLanguage":
+            cycleVoiceLanguage()
         case "pause":
             if Pause.active { Pause.stop(); VoiceIndicator.shared.showToast(L10n.t("quick.resumed")) }
             else {
@@ -552,6 +609,27 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         case "settings": onOpenSettings?()
         default:         copyLastDictation()
         }
+    }
+
+    /// Переключение языка распознавания голоса по кругу (Auto → RU → EN → Auto).
+    func cycleVoiceLanguage() {
+        let cur = settings.voiceLanguage
+        let next: String
+        let toastKey: String
+        switch cur {
+        case "auto":
+            next = "ru"
+            toastKey = "voice.langToastRU"
+        case "ru":
+            next = "en"
+            toastKey = "voice.langToastEN"
+        default:
+            next = "auto"
+            toastKey = "voice.langToastAuto"
+        }
+        settings.voiceLanguage = next
+        applyIconStyle()
+        VoiceIndicator.shared.showToast(L10n.t(toastKey))
     }
 
     /// ⚠️ ПЕРЕСБОРКА В МОМЕНТ ОТКРЫТИЯ (30.07). Раньше меню собиралось только по событиям — смена
@@ -738,12 +816,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
         menu.addItem(.separator())
 
-        // Быстрый доступ (в духе OpenSuperWhisper): микрофон.
-        // ЯЗЫК РАСПОЗНАВАНИЯ УБРАН ОТСЮДА 30.07 (задача T40). Он меняется редко, дефолт «Авто» и так
-        // стоит (AppSettings.voiceLanguage), а в настройках селектор уже есть — SettingsWindow
-        // .voiceLangControl(). В меню он занимал строку и целое подменю ради того, что человек трогает
-        // раз в жизни. Пункт микрофона остаётся: устройство меняется на ходу (наушники пришли/ушли).
+        // Быстрый доступ (в духе OpenSuperWhisper): микрофон и язык распознавания.
         menu.addItem(microphoneSubmenu())
+        menu.addItem(voiceLanguageSubmenu())
 
         // «Скопировать последнюю диктовку» — ПЕРЕД историей: чаще нужна именно последняя расшифровка,
         // а не окно со списком (в Handy это `copy last transcript`).
@@ -875,6 +950,51 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
         item.submenu = sub
         return item
+    }
+
+    /// Подменю «Язык распознавания» — выбор Auto / RU / EN прямо из главного меню.
+    private func voiceLanguageSubmenu() -> NSMenuItem {
+        let cur = settings.voiceLanguage
+        let title: String
+        switch cur {
+        case "ru": title = L10n.t("voice.langMenuRU")
+        case "en": title = L10n.t("voice.langMenuEN")
+        default:   title = L10n.t("voice.langMenuAuto")
+        }
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.image = icon("globe")
+        let sub = NSMenu()
+
+        let autoItem = NSMenuItem(title: L10n.t("voice.langAuto"), action: #selector(selectVoiceLangMenu(_:)), keyEquivalent: "")
+        autoItem.target = self; autoItem.representedObject = "auto"
+        autoItem.state = (cur == "auto") ? .on : .off
+        sub.addItem(autoItem)
+
+        let ruItem = NSMenuItem(title: "Русский (RU)", action: #selector(selectVoiceLangMenu(_:)), keyEquivalent: "")
+        ruItem.target = self; ruItem.representedObject = "ru"
+        ruItem.state = (cur == "ru") ? .on : .off
+        sub.addItem(ruItem)
+
+        let enItem = NSMenuItem(title: "English (EN)", action: #selector(selectVoiceLangMenu(_:)), keyEquivalent: "")
+        enItem.target = self; enItem.representedObject = "en"
+        enItem.state = (cur == "en") ? .on : .off
+        sub.addItem(enItem)
+
+        item.submenu = sub
+        return item
+    }
+
+    @objc private func selectVoiceLangMenu(_ sender: NSMenuItem) {
+        guard let lang = sender.representedObject as? String else { return }
+        settings.voiceLanguage = lang
+        applyIconStyle()
+        let toastKey: String
+        switch lang {
+        case "ru": toastKey = "voice.langToastRU"
+        case "en": toastKey = "voice.langToastEN"
+        default:   toastKey = "voice.langToastAuto"
+        }
+        VoiceIndicator.shared.showToast(L10n.t(toastKey))
     }
 
     private func startPolling() {

@@ -120,6 +120,13 @@ enum L10n {
         "quick.sub":      [.ru: "Правый клик и шлепок настраиваются независимо. Левый клик по значку по-прежнему открывает меню.", .en: "Right click and slap are configured independently. Left click still opens the menu."],
         "quick.subNoSlap":[.ru: "Выбери действие по правому клику. Левый клик по значку по-прежнему открывает меню.", .en: "Choose what right click does. Left click still opens the menu."],
         "quick.copyVoice":[.ru: "Копировать последнюю диктовку", .en: "Copy the last dictation"],
+        "quick.switchVoiceLanguage":[.ru: "Переключить язык диктовки (Авто / RU / EN)", .en: "Switch dictation language (Auto / RU / EN)"],
+        "voice.langMenuAuto":  [.ru: "Язык диктовки: Авто", .en: "Dictation: Auto"],
+        "voice.langMenuRU":    [.ru: "Язык диктовки: RU", .en: "Dictation: RU"],
+        "voice.langMenuEN":    [.ru: "Язык диктовки: EN", .en: "Dictation: EN"],
+        "voice.langToastAuto": [.ru: "Диктовка: Авто", .en: "Dictation: Auto"],
+        "voice.langToastRU":   [.ru: "Диктовка: RU (Русский)", .en: "Dictation: RU (Russian)"],
+        "voice.langToastEN":   [.ru: "Диктовка: EN (English)", .en: "Dictation: EN (English)"],
         // ⚠️ ИМЯ ФУНКЦИИ ЖИВЁТ В ЧЕТЫРЁХ СТРОКАХ СРАЗУ (переименование, автор 07.08). Было
         // «Помолчать», и оно путалось с нашей же настройкой «без звуков»: читалось как «выключи
         // звуки», хотя речь про ввод. «Не мешать» опирается на готовую привычку от системного

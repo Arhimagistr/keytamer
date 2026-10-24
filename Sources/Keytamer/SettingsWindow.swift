@@ -4352,7 +4352,10 @@ final class DetailVC: NSViewController {
     }
     @objc private func voiceLangChanged(_ s: NSPopUpButton) {
         let i = s.indexOfSelectedItem
-        if i >= 0, i < voiceLangCodes.count { settings.voiceLanguage = voiceLangCodes[i] }
+        if i >= 0, i < voiceLangCodes.count {
+            settings.voiceLanguage = voiceLangCodes[i]
+            MenuBarController.shared?.applyIconStyle()
+        }
     }
 
     private var voiceAutoSwitchCodes: [String] = []

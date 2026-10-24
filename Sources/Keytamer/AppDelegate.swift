@@ -1300,6 +1300,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .copyVoice:
             // В slapOptions этого значения нет; неизвестные defaults уже fail-close в AppSettings.
             break
+        case .switchVoiceLanguage:
+            menuBar?.cycleVoiceLanguage()
         }
 
         if ProcessInfo.processInfo.environment["KEYBOOP_SLAP_DIAG"] == "1" {

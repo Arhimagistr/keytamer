@@ -224,16 +224,20 @@ final class VoiceController {
         VoiceGate.set(true)            // СИНХРОННО: намерение записывать — toggle сразу видит активность
         starting = true
         abortStart = false
-        dictationScript = layout.currentScript()
         let autoLayout = settings.voiceAutoSwitchLayout
         if autoLayout != "off" {
             if autoLayout == "ru" {
                 layout.selectLayout(cyrillic: true)
+                dictationScript = .cyrillic
             } else if autoLayout == "en" {
                 layout.selectLayout(cyrillic: false)
+                dictationScript = .latin
             } else {
                 layout.selectSource(id: autoLayout)
+                dictationScript = layout.currentScript()
             }
+        } else {
+            dictationScript = layout.currentScript()
         }
         lastVoiceUseAt = Date()        // маркер «пользователь диктует» для анти-карусели pressure-выгрузки
         Task { @MainActor in
@@ -1000,9 +1004,21 @@ final class VoiceController {
         }
     }
 
-    /// Язык для whisper — из настроек (по умолчанию "auto" → акустическое автоопределение).
+    /// Язык для whisper/parakeet: если в настройках "auto", язык определяется по скрипту раскладки
+    /// (en для латиницы, ru для кириллицы). Если в настройках задан конкретный язык ("ru"/"en"), используется он.
     private func languageForWhisper() -> String {
-        settings.voiceLanguage
+        let lang = settings.voiceLanguage
+        if lang == "auto" {
+            switch dictationScript {
+            case .latin:
+                return "en"
+            case .cyrillic:
+                return "ru"
+            case .other:
+                return "auto"
+            }
+        }
+        return lang
     }
 
     // MARK: - Импорт файла (задача 229)

@@ -15,6 +15,7 @@ enum ReleaseFeatures {
 /// меняет существующее поведение.
 enum QuickAction: String, CaseIterable {
     case copyVoice
+    case switchVoiceLanguage
     case pause
     case dictate
     case history
@@ -23,7 +24,7 @@ enum QuickAction: String, CaseIterable {
 
     /// Правый клик активирует Keyboop и теряет фокус чужого поля, поэтому ручной перевод текста ему
     /// предлагать нельзя. Порядок совпадает с прежним списком в настройках.
-    static let rightClickOptions: [QuickAction] = [.copyVoice, .pause, .dictate, .history, .settings]
+    static let rightClickOptions: [QuickAction] = [.switchVoiceLanguage, .copyVoice, .pause, .dictate, .history, .settings]
     /// Шлепок не требует клика по строке меню, поэтому его безопасное основное действие — тот же
     /// ручной путь «переключить / отменить», который позже подключит runtime.
     static let slapOptions: [QuickAction] = [.manualSwitchOrUndo, .dictate, .pause, .history, .settings]
