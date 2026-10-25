@@ -38,6 +38,18 @@ final class VoiceIndicator {
 
     private let H: CGFloat = 38         // высота обычной плашки
 
+    private init() {
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            if self?.islandOn == true {
+                self?.hide()
+            }
+        }
+    }
+
     /// ВЫСОТА СТРОКИ В ОСТРОВЕ — НИЖЕ, ЧЕМ У ПЛАШКИ (автор 13.08: «отступ от реального выреза убрать
     /// вообще, прижаться вплотную вверх, снизу оставить небольшой отступ по чёрному, и в целом
     /// уменьшить панель по высоте»).

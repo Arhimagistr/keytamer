@@ -150,7 +150,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     /// Кэш и генератор полупрозрачных прямоугольных подложек под текст языка («Ru» / «En»):
     /// сохраняет привычный шрифт и регистр текста, добавляя аккуратный полупрозрачный фон.
     private static var plateCache: [String: NSImage] = [:]
+    private static let plateLock = NSLock()
     static func badgeWithPlate(text: String) -> NSImage {
+        plateLock.lock()
+        defer { plateLock.unlock() }
         if let cached = plateCache[text] { return cached }
         let font = NSFont.menuBarFont(ofSize: 0)
         let str = text as NSString

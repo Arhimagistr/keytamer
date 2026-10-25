@@ -219,7 +219,12 @@ enum TextReplacer {
         }
     }
 
-    private static let vKey: CGKeyCode = 9
+    private static var vKey: CGKeyCode {
+        if let code = DynamicKeymap.latinKeyCodes["v"] {
+            return CGKeyCode(code)
+        }
+        return 9 // ANSI V fallback
+    }
 
     private static func sendCmdV(source: CGEventSource?) {
         if let down = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: true) {
