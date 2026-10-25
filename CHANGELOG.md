@@ -36,3 +36,6 @@
 - Полная изоляция каталогов `Application Support/Keytamer` (`VoiceHistory`, `VoiceController`, `HistoryGate`) с автомиграцией истории и взаимной проверкой замка `singleton.lock` с Keyboop.
 - Исключение маркера `TransientType` при восстановлении оригинального буфера пользователя в `TextReplacer.pasteViaClipboard`.
 - Сериализация вызовов `TextReplacer.pasteViaClipboard` через единую очередь синтетики `synthQueue`.
+- Замена онбординг-видео на `keytamer-logo-anim.mp4`, перевод векторного знака строки меню на модуль `KeytamerMark.swift`, унификация логов на `Keytamer:` и зачистка легаси-бренда в строках интерфейса `L10n.swift` (Батч 1).
+- YAGNI-рефакторинг: слияние микрофайла `SlapTypes.swift` в `SlapDetector.swift`, синхронизация типов кортежей в `Engine.swift` (устранение Tuple Shuffle Deprecation), устранение неиспользуемых и неизменяемых переменных в `TextReplacer.swift`, `NotchIsland.swift` и `AppBanner.swift` (Батч 2).
+- Устранение дефектов надежности протоколов ввода: динамическое определение скан-кода клавиши вставки 'V' для раскладок Dvorak/Colemak/AZERTY через `DynamicKeymap.latinKeyCodes["v"]`, потокобезопасность `plateCache` через `plateLock` в `MenuBarController.swift`, регистрация слушателя `NSApplication.didChangeScreenParametersNotification` в `VoiceIndicator.swift` (Батч 3).
