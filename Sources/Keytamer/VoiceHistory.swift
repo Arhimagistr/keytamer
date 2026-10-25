@@ -17,10 +17,14 @@ final class VoiceHistory {
     typealias Entry = HistoryEntry
 
     private init() {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Keyboop", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dir = Self.supportDir()
         fileURL = dir.appendingPathComponent("history.enc")
+        let legacyURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Keyboop/history.enc")
+        if !FileManager.default.fileExists(atPath: fileURL.path),
+           FileManager.default.fileExists(atPath: legacyURL.path) {
+            try? FileManager.default.copyItem(at: legacyURL, to: fileURL)
+        }
         cache = load()
         if prune() { save() }   // на старте подчистить записи старше срока хранения
         // Сироты: клипы, чьи записи исчезли путём, который про файлы не знал (перевыпуск ключа
@@ -292,7 +296,7 @@ final class VoiceHistory {
 
     private static func supportDir() -> URL {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Keyboop", isDirectory: true)
+            .appendingPathComponent("Keytamer", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }

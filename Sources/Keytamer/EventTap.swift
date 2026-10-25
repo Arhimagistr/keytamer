@@ -976,7 +976,11 @@ final class EventTap {
         // доживал до отпускания ⌥ и стрелял (проверено опытом 04.08.2026).
         if voiceModArmed {
             let vm = relevantMods(CGEventFlags(rawValue: s.voiceHotkeyModifiers))
-            if !relevantMods(flags).subtracting(vm).isEmpty { voiceModArmed = false }
+            let overMod = voiceModArmedOverride ? relevantMods(overrideModifierMask()) : []
+            if !relevantMods(flags).subtracting(vm).subtracting(overMod).isEmpty {
+                voiceModArmed = false
+                voiceModArmedOverride = false
+            }
         }
         // В режиме УДЕРЖАНИЯ взвода нет: запись стартует прямо по нажатию, иначе жест перестанет
         // быть удержанием. Значит аккорд успевает её запустить, и единственное лечение это оборвать

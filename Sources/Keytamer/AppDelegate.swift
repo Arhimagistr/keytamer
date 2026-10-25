@@ -1148,8 +1148,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Короткий ретрай: при Sparkle-перезапуске новая копия может стартовать на миг раньше, чем старая
     /// отпустит замок — даём ~2с освободиться, иначе ложно решим «уже запущен».
     private func acquireSingleInstanceLock() -> Bool {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Keytamer", isDirectory: true)
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+
+        // Проверяем легаси-замок Keyboop: если оригинальный Keyboop сейчас запущен и держит замок,
+        // блокируем запуск во избежание двойного активного CGEventTap и порчи набора.
+        let legacyLockPath = appSupport.appendingPathComponent("Keyboop/singleton.lock").path
+        if FileManager.default.fileExists(atPath: legacyLockPath) {
+            let legacyFD = open(legacyLockPath, O_RDWR | O_CLOEXEC | O_NOFOLLOW)
+            if legacyFD >= 0 {
+                if flock(legacyFD, LOCK_EX | LOCK_NB) != 0 && (errno == EWOULDBLOCK || errno == EAGAIN) {
+                    kbLog("single-instance: обнаружен запущенный Keyboop (держит Keyboop/singleton.lock) — запуск заблокирован")
+                    close(legacyFD)
+                    return false
+                }
+                close(legacyFD)
+            }
+        }
+
+        let dir = appSupport.appendingPathComponent("Keytamer", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let path = dir.appendingPathComponent("singleton.lock").path
         let fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0o600)

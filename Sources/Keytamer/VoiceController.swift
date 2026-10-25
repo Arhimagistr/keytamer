@@ -717,7 +717,7 @@ final class VoiceController {
     /// паузу после вставки текста, иначе перезапуск придётся ровно на момент, когда человек
     /// дочитывает вставленное и может докиктовать следом.
     static let busyMarker = URL(fileURLWithPath: NSHomeDirectory())
-        .appendingPathComponent("Library/Application Support/Keyboop/voice-busy")
+        .appendingPathComponent("Library/Application Support/Keytamer/voice-busy")
 
     private func markBusy(_ busy: Bool) {
         let url = Self.busyMarker

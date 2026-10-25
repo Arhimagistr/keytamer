@@ -19,10 +19,16 @@ enum HistoryGate {
     private static let fileVersion: UInt8 = 1
     private static let iterations: UInt32 = 210_000
     private static var fileURL: URL {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Keyboop", isDirectory: true)
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let dir = appSupport.appendingPathComponent("Keytamer", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent(".histgate")
+        let target = dir.appendingPathComponent(".histgate")
+        let legacy = appSupport.appendingPathComponent("Keyboop/.histgate")
+        if !FileManager.default.fileExists(atPath: target.path),
+           FileManager.default.fileExists(atPath: legacy.path) {
+            try? FileManager.default.copyItem(at: legacy, to: target)
+        }
+        return target
     }
 
     static var enabled: Bool { FileManager.default.fileExists(atPath: fileURL.path) }

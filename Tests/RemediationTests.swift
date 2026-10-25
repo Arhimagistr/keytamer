@@ -97,7 +97,7 @@ struct EventTapState {
     }
 }
 
-func testLegacyEventTapDisarmsIncorrectly() {
+func testEventTapModifierOverrideDisarmBehavior() {
     print("\n--- Test 1: EventTap Modifier Override Disarm Behavior ---")
     let voiceHotkeyMods = CGEventFlags.maskAlternate.rawValue
     let overrideMod = CGEventFlags.maskCommand
@@ -105,7 +105,7 @@ func testLegacyEventTapDisarmsIncorrectly() {
     // Test A: Solo tap (Option down -> Option up)
     var stateSolo = EventTapState()
     stateSolo.onKeyDown(flags: [.maskAlternate], voiceHotkeyModifiers: voiceHotkeyMods, overrideModifierMask: overrideMod)
-    stateSolo.processFlagsChangedLegacy(flags: [], voiceHotkeyModifiers: voiceHotkeyMods, overrideModifierMask: overrideMod)
+    stateSolo.processFlagsChangedPatched(flags: [], voiceHotkeyModifiers: voiceHotkeyMods, overrideModifierMask: overrideMod)
     stateSolo.onKeyUp(flags: [], voiceHotkeyModifiers: voiceHotkeyMods)
     assertTrue(stateSolo.toggleVoiceCalled, "Solo tap triggers toggleVoice")
     assertEqual(stateSolo.toggleVoiceOverrideArg, false, "Solo tap override argument is false")
@@ -117,14 +117,22 @@ func testLegacyEventTapDisarmsIncorrectly() {
     assertTrue(stateOverride.voiceModArmedOverride, "Option+Cmd sets voiceModArmedOverride")
 
     // Option is released: flags now contains only .maskCommand
-    // IN LEGACY CODE: processFlagsChangedLegacy erroneously resets voiceModArmed!
-    stateOverride.processFlagsChangedLegacy(flags: [.maskCommand], voiceHotkeyModifiers: voiceHotkeyMods, overrideModifierMask: overrideMod)
+    // Patched logic: voiceModArmed remains armed!
+    stateOverride.processFlagsChangedPatched(flags: [.maskCommand], voiceHotkeyModifiers: voiceHotkeyMods, overrideModifierMask: overrideMod)
+    assertTrue(stateOverride.voiceModArmed, "Releasing Option while holding Cmd keeps voiceMod armed")
     stateOverride.onKeyUp(flags: [.maskCommand], voiceHotkeyModifiers: voiceHotkeyMods)
 
     // Contract: toggleVoice MUST be called with override=true.
-    // In unpatched legacy code, this FAILS!
-    assertTrue(stateOverride.toggleVoiceCalled, "Override tap MUST trigger toggleVoice on key up")
-    assertEqual(stateOverride.toggleVoiceOverrideArg, true, "Override tap MUST pass override=true")
+    assertTrue(stateOverride.toggleVoiceCalled, "Override tap triggers toggleVoice on key up")
+    assertEqual(stateOverride.toggleVoiceOverrideArg, true, "Override tap passes override=true")
+
+    // Test C: Unrelated modifier (Option + Command + Shift) MUST disarm
+    var stateChord = EventTapState()
+    stateChord.onKeyDown(flags: [.maskAlternate, .maskCommand], voiceHotkeyModifiers: voiceHotkeyMods, overrideModifierMask: overrideMod)
+    stateChord.processFlagsChangedPatched(flags: [.maskAlternate, .maskCommand, .maskShift],
+                                         voiceHotkeyModifiers: voiceHotkeyMods,
+                                         overrideModifierMask: overrideMod)
+    assertFalse(stateChord.voiceModArmed, "Adding Shift to Option+Cmd must disarm voiceMod")
 }
 
 // MARK: - 2. Storage Paths Isolation (P0 Defect 2)
@@ -136,21 +144,21 @@ func testStoragePathsIsolation() {
     let voiceControllerPath = "/Users/manar/AIII/projects/keytamer/Sources/Keytamer/VoiceController.swift"
     let appDelegatePath = "/Users/manar/AIII/projects/keytamer/Sources/Keytamer/AppDelegate.swift"
 
-    guard let vhContent = try? String(contentsOfFile: voiceHistoryPath) else {
+    guard let vhContent = try? String(contentsOf: URL(fileURLWithPath: voiceHistoryPath), encoding: .utf8) else {
         testFailures.append("Could not read VoiceHistory.swift")
         return
     }
-    guard let vcContent = try? String(contentsOfFile: voiceControllerPath) else {
+    guard let vcContent = try? String(contentsOf: URL(fileURLWithPath: voiceControllerPath), encoding: .utf8) else {
         testFailures.append("Could not read VoiceController.swift")
         return
     }
-    guard let adContent = try? String(contentsOfFile: appDelegatePath) else {
+    guard let adContent = try? String(contentsOf: URL(fileURLWithPath: appDelegatePath), encoding: .utf8) else {
         testFailures.append("Could not read AppDelegate.swift")
         return
     }
 
-    // In current unpatched code:
-    // VoiceHistory.swift contains .appendingPathComponent("Keyboop", isDirectory: true)
+    // In patched code:
+    // VoiceHistory.swift uses Keytamer directory
     let vhHasKeyboopDir = vhContent.contains(".appendingPathComponent(\"Keyboop\", isDirectory: true)")
     assertFalse(vhHasKeyboopDir, "VoiceHistory.swift must NOT use Keyboop directory")
 
@@ -158,8 +166,8 @@ func testStoragePathsIsolation() {
     assertFalse(vcHasKeyboopBusy, "VoiceController.swift must NOT write voice-busy to Keyboop directory")
 
     // AppDelegate must check both Keytamer and Keyboop lock files
-    let adChecksKeyboopLock = adContent.contains("Keyboop/singleton.lock") || adContent.contains("singleton.lock")
-    assertTrue(adChecksKeyboopLock, "AppDelegate.swift must guard against dual instances")
+    let adChecksKeyboopLock = adContent.contains("Keyboop/singleton.lock")
+    assertTrue(adChecksKeyboopLock, "AppDelegate.swift must guard against dual instances via Keyboop lock")
 }
 
 // MARK: - 3. Clipboard TransientType Integrity (P1 Defect 4)
@@ -167,13 +175,11 @@ func testStoragePathsIsolation() {
 func testClipboardTransientTypeIntegrity() {
     print("\n--- Test 3: Clipboard TransientType Integrity ---")
     let textReplacerPath = "/Users/manar/AIII/projects/keytamer/Sources/Keytamer/TextReplacer.swift"
-    guard let trContent = try? String(contentsOfFile: textReplacerPath) else {
+    guard let trContent = try? String(contentsOf: URL(fileURLWithPath: textReplacerPath), encoding: .utf8) else {
         testFailures.append("Could not read TextReplacer.swift")
         return
     }
 
-    // Line 291 in TextReplacer.swift currently sets TransientType on restored user items:
-    // it.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.TransientType"))
     let setsTransientOnRestoredSnapshot = trContent.contains("for p in pairs { it.setData(p.data, forType: p.type) }\n                    it.setData(Data(), forType: NSPasteboard.PasteboardType(\"org.nspasteboard.TransientType\"))")
         || trContent.contains("for p in pairs { it.setData(p.data, forType: p.type) }\r\n                    it.setData(Data(), forType: NSPasteboard.PasteboardType(\"org.nspasteboard.TransientType\"))")
 
@@ -183,7 +189,7 @@ func testClipboardTransientTypeIntegrity() {
 // MARK: - Main Runner
 
 print("=== KEYTAMER REMEDIATION SUITE ===")
-testLegacyEventTapDisarmsIncorrectly()
+testEventTapModifierOverrideDisarmBehavior()
 testStoragePathsIsolation()
 testClipboardTransientTypeIntegrity()
 
