@@ -102,3 +102,18 @@
 - **Consequences:**  
   - 100% изоляция идентификаторов, логов и ресурсов Keytamer.
   - Устранение риска коллизий с установленными в системе легаси-версиями.
+
+## 2026-10-25 ADR-007: YAGNI-рефакторинг, слияние поверхностных модулей и ликвидация рассогласования кортежей (Батч 2)
+
+- **Context:**  
+  Аудит кодовой базы по принципам YAGNI и Simple Design (Kent Beck, Sandi Metz, John Ousterhout) выявил:
+  1. Поверхностный микрофайл `SlapTypes.swift` (26 строк), искусственно отделенный от `SlapDetector.swift`.
+  2. Рассогласование порядка элементов кортежей между `KeystrokeBuffer.swift` (`word: String, deleteCount: Int, tail: String`) и `Engine.swift` (`word: String, tail: String, deleteCount: Int`), приводящее к неявному перемешиванию кортежей компилятором (Tuple Shuffle Deprecation).
+  3. Неиспользуемые и неизменяемые мутабельные переменные (`var u` в `TextReplacer.swift`, `let nH` в `NotchIsland.swift`, `var w` в `AppBanner.swift`).
+- **Decision:**  
+  1. Применить паттерн Coalesce Micro-files: слить `SlapTypes.swift` непосредственно в `SlapDetector.swift`, удалив сиротский 26-строчный файл.
+  2. Унифицировать сигнатуры `fixTwoLeadingCaps` и `fixTypo` в `Engine.swift`, приведя их порядок к каноническому кортежу буфера `(word: String, deleteCount: Int, tail: String)`.
+  3. Устранить мутабельность немодифицируемых переменных и удалить неиспользуемые переменные силуэта.
+- **Consequences:**  
+  - Сокращение числа сущностей (Fewest Elements) без потери функциональности.
+  - Устранение предупреждений компилятора Swift 5 и обеспечение готовности к строгому режиму Swift 6.
