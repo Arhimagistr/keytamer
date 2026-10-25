@@ -335,6 +335,29 @@ func testInputReliabilityAndProtocolHygiene() {
     }
 }
 
+// MARK: - 7. Coexistence Mode with Keyboop Lock (ADR-009)
+
+func testCoexistenceModeWithKeyboopLock() {
+    print("\n--- Test 7: Coexistence Mode with Keyboop Lock (ADR-009) ---")
+    let appDelegatePath = "/Users/manar/AIII/projects/keytamer/Sources/Keytamer/AppDelegate.swift"
+    guard let adContent = try? String(contentsOf: URL(fileURLWithPath: appDelegatePath), encoding: .utf8) else {
+        testFailures.append("Could not read AppDelegate.swift")
+        return
+    }
+
+    // 1. Must check Keyboop lock file
+    let checksKeyboopLock = adContent.contains("Keyboop/singleton.lock")
+    assertTrue(checksKeyboopLock, "AppDelegate.swift must check Keyboop/singleton.lock")
+
+    // 2. Must NOT block startup on active Keyboop lock
+    let blocksOnKeyboopLock = adContent.contains("single-instance: обнаружен запущенный Keyboop (держит Keyboop/singleton.lock) — запуск заблокирован")
+    assertFalse(blocksOnKeyboopLock, "AppDelegate.swift must NOT block startup when Keyboop is running")
+
+    // 3. Must explicitly log parallel coexistence mode
+    let logsCoexistence = adContent.contains("параллельного сосуществования")
+    assertTrue(logsCoexistence, "AppDelegate.swift must log parallel coexistence mode when Keyboop is detected")
+}
+
 // MARK: - Main Runner
 
 print("=== KEYTAMER REMEDIATION SUITE ===")
@@ -344,6 +367,7 @@ testClipboardTransientTypeIntegrity()
 testRebrandingAndAssetIsolation()
 testYAGNIRefactoringAndCompilerHygiene()
 testInputReliabilityAndProtocolHygiene()
+testCoexistenceModeWithKeyboopLock()
 
 print("\n=== SUMMARY ===")
 if testFailures.isEmpty {
