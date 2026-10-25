@@ -16,6 +16,12 @@
   - Настройка сборочных скриптов `build-app.sh` и `install-local.sh` под `Keytamer.app`.
   - Реструктуризация истории коммитов Git с чистой цепочкой изменений.
   - Публикация репозитория на GitHub.
+- [ ] **Phase 4: Ремедиация дефектов totals-critic и TDD верификация**
+  - [ ] Фикс сброса флага `voiceModArmed` при удержании оверрайда (`EventTap.swift`)
+  - [ ] Изоляция путей `Application Support/Keytamer` и взаимная проверка `singleton.lock` с Keyboop
+  - [ ] Устранение `TransientType` при восстановлении буфера пользователя (`TextReplacer.swift`)
+  - [ ] Сериализация `pasteViaClipboard` через `synthQueue`
+  - [ ] TDD регрессионный сьют и приемочный аудит work-verifier
 
 ## Active Tasks
 - [x] Инициализация когнитивной памяти проекта (MIND v6.3).
@@ -33,3 +39,8 @@
 - [x] Временный оверрайд языка диктовки по хоткею (клавиша-модификатор `voiceOverrideModifier` + основной хоткей) с выбором целевого языка.
 - [x] Полупрозрачная прямоугольная подложка под нативным индикатором `Ru` / `En` в Menu Bar при выборе конкретного языка.
 - [x] Звуковая микро-обратная связь (`Tink`) при переключении режимов диктовки.
+- [ ] [P0] Устранение сброса `voiceModArmed` в `EventTap.swift` при удержании Command.
+- [ ] [P0] Перевод путей `VoiceHistory`, `VoiceController` на `Keytamer` и взаимный замок с Keyboop.
+- [ ] [P1] Удаление `TransientType` при восстановлении буфера в `TextReplacer.swift`.
+- [ ] [P1] Сериализация `pasteViaClipboard` через `synthQueue`.
+- [ ] [QA] Запуск TDD тестов и независимый аудит через субагент work-verifier.
