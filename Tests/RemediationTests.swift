@@ -249,6 +249,56 @@ func testRebrandingAndAssetIsolation() {
     }
 }
 
+// MARK: - 5. YAGNI Refactoring and Compiler Hygiene (ADR-007)
+
+func testYAGNIRefactoringAndCompilerHygiene() {
+    print("\n--- Test 5: YAGNI Refactoring and Compiler Hygiene ---")
+    let projectDir = "/Users/manar/AIII/projects/keytamer"
+    let slapTypesPath = "\(projectDir)/Sources/Keytamer/SlapTypes.swift"
+    let slapDetectorPath = "\(projectDir)/Sources/Keytamer/SlapDetector.swift"
+    let enginePath = "\(projectDir)/Sources/Keytamer/Engine.swift"
+    let textReplacerPath = "\(projectDir)/Sources/Keytamer/TextReplacer.swift"
+    let notchIslandPath = "\(projectDir)/Sources/Keytamer/NotchIsland.swift"
+
+    let fm = FileManager.default
+
+    // 1. SlapTypes.swift must be coalesced into SlapDetector.swift
+    assertFalse(fm.fileExists(atPath: slapTypesPath), "SlapTypes.swift must be removed (coalesced into SlapDetector.swift)")
+
+    if let sdContent = try? String(contentsOf: URL(fileURLWithPath: slapDetectorPath), encoding: .utf8) {
+        assertTrue(sdContent.contains("enum SlapSensitivity: String, CaseIterable"), "SlapDetector.swift must contain SlapSensitivity definition")
+        assertTrue(sdContent.contains("enum SlapDetectorAvailability: Equatable"), "SlapDetector.swift must contain SlapDetectorAvailability definition")
+    } else {
+        testFailures.append("Could not read SlapDetector.swift")
+    }
+
+    // 2. Engine.swift tuple matching
+    if let engineContent = try? String(contentsOf: URL(fileURLWithPath: enginePath), encoding: .utf8) {
+        let hasUnifiedTwoLeadingCaps = engineContent.contains("func fixTwoLeadingCaps(word: String, item: (word: String, deleteCount: Int, tail: String))")
+        let hasUnifiedTypo = engineContent.contains("func fixTypo(word: String, item: (word: String, deleteCount: Int, tail: String))")
+        assertTrue(hasUnifiedTwoLeadingCaps, "Engine.swift fixTwoLeadingCaps must match KeystrokeBuffer tuple order")
+        assertTrue(hasUnifiedTypo, "Engine.swift fixTypo must match KeystrokeBuffer tuple order")
+    } else {
+        testFailures.append("Could not read Engine.swift")
+    }
+
+    // 3. TextReplacer.swift unused mutable variable
+    if let trContent = try? String(contentsOf: URL(fileURLWithPath: textReplacerPath), encoding: .utf8) {
+        let hasVarU = trContent.contains("var u = Array(\"прогрев\".utf16)")
+        assertFalse(hasVarU, "TextReplacer.swift must use 'let u' instead of 'var u'")
+    } else {
+        testFailures.append("Could not read TextReplacer.swift")
+    }
+
+    // 4. NotchIsland.swift unused variable nH
+    if let niContent = try? String(contentsOf: URL(fileURLWithPath: notchIslandPath), encoding: .utf8) {
+        let hasUnusedNH = niContent.contains("let nW = notch.width, nH = notch.height")
+        assertFalse(hasUnusedNH, "NotchIsland.swift must not declare unused nH in silhouette()")
+    } else {
+        testFailures.append("Could not read NotchIsland.swift")
+    }
+}
+
 // MARK: - Main Runner
 
 print("=== KEYTAMER REMEDIATION SUITE ===")
@@ -256,6 +306,7 @@ testEventTapModifierOverrideDisarmBehavior()
 testStoragePathsIsolation()
 testClipboardTransientTypeIntegrity()
 testRebrandingAndAssetIsolation()
+testYAGNIRefactoringAndCompilerHygiene()
 
 print("\n=== SUMMARY ===")
 if testFailures.isEmpty {
