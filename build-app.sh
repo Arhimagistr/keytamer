@@ -245,9 +245,9 @@ cp Sources/Keytamer/Resources/*.json "$APP/Contents/Resources/" 2>/dev/null || e
 cp Sources/Keytamer/Resources/menubar-mark.png "$APP/Contents/Resources/" 2>/dev/null || echo "  (нет menubar-mark.png — значок будет вектором-фолбэком)"
 
 # Анимированный логотип (онбординг-герой). 59 КБ, без звука, h264.
-cp Sources/Keytamer/Resources/keyboop-logo-anim.mp4 "$APP/Contents/Resources/" 2>/dev/null \
-  && echo "  ресурс: keyboop-logo-anim.mp4 (онбординг)" \
-  || echo "  (нет keyboop-logo-anim.mp4 — онбординг покажет статичную иконку)"
+cp Sources/Keytamer/Resources/keytamer-logo-anim.mp4 "$APP/Contents/Resources/" 2>/dev/null \
+  && echo "  ресурс: keytamer-logo-anim.mp4 (онбординг)" \
+  || echo "  (нет keytamer-logo-anim.mp4 — онбординг покажет статичную иконку)"
 
 # Asset Catalog → coral как системный accent (чекбоксы/тумблеры/popup станут оранжевыми).
 if [ -d Resources/Assets.xcassets ]; then

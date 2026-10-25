@@ -474,7 +474,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             if let mark = Self.markImage {
                 mark.draw(in: markRect, from: .zero, operation: .sourceOver, fraction: 1)
             } else {
-                KeyboopMark.draw(in: markRect, color: .black)
+                KeytamerMark.draw(in: markRect, color: .black)
             }
         }
         NSColor.black.setFill()

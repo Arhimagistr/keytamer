@@ -43,7 +43,7 @@ private let kbLogPathOnce: Void = {
 
 func kbLog(_ message: String) {
     #if DEBUG
-    NSLog("Keyboop: \(message)")
+    NSLog("Keytamer: \(message)")
     #endif
     _ = kbLogPathOnce
     let line = "[\(Date())] \(message)\n"
