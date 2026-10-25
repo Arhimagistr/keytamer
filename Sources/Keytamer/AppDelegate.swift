@@ -1151,15 +1151,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
 
         // Проверяем легаси-замок Keyboop: если оригинальный Keyboop сейчас запущен и держит замок,
-        // блокируем запуск во избежание двойного активного CGEventTap и порчи набора.
+        // фиксируем совместный режим работы (сосуществование без взаимной блокировки).
         let legacyLockPath = appSupport.appendingPathComponent("Keyboop/singleton.lock").path
         if FileManager.default.fileExists(atPath: legacyLockPath) {
             let legacyFD = open(legacyLockPath, O_RDWR | O_CLOEXEC | O_NOFOLLOW)
             if legacyFD >= 0 {
                 if flock(legacyFD, LOCK_EX | LOCK_NB) != 0 && (errno == EWOULDBLOCK || errno == EAGAIN) {
-                    kbLog("single-instance: обнаружен запущенный Keyboop (держит Keyboop/singleton.lock) — запуск заблокирован")
-                    close(legacyFD)
-                    return false
+                    kbLog("single-instance: обнаружен запущенный Keyboop (держит Keyboop/singleton.lock) — включен режим параллельного сосуществования")
                 }
                 close(legacyFD)
             }
