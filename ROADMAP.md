@@ -28,7 +28,7 @@
   - [x] **Batch 3: Дефекты надежности ввода P1/P2 (динамический keyCode ⌘V, потокобезопасность)**
 - [ ] **Phase 6: Сосуществование Keytamer и Keyboop и релиз v1.0.0**
   - [x] Неблокирующий замок singleton для параллельной работы Keyboop и Keytamer (ADR-009)
-  - [ ] Локальная сборка и установка в `/Applications/Keytamer.app`
+  - [x] Локальная сборка и установка в `/Applications/Keytamer.app`
   - [ ] Создание релизного тега `v1.0.0` и публикация в GitHub
 
 ## Active Tasks

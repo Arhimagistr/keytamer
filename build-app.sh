@@ -374,10 +374,20 @@ if [ "${KEYTAMER_RELEASE:-}" != "1" ] && [ "${KEYBOOP_RELEASE:-}" != "1" ]; then
 fi
 
 # Подпись. Два режима:
-#   • DEV (по умолчанию) — self-signed "Keytamer Dev", без timestamp/hardened runtime; entitlements
-#     с disable-library-validation, чтобы загрузить встроенный Sparkle.framework. Для локалки.
+#   • DEV (по умолчанию) — self-signed "Keytamer Dev", действительный Apple Development или ad-hoc "-",
+#     без timestamp/hardened runtime; entitlements с disable-library-validation. Для локалки.
 #   • RELEASE (KEYTAMER_RELEASE=1) — Developer ID + hardened runtime + timestamp (нотаризация).
-SIGN_ID="${KEYTAMER_SIGN_ID:-${KEYBOOP_SIGN_ID:-Keytamer Dev}}"
+if [ -z "${KEYTAMER_SIGN_ID:-}" ] && [ -z "${KEYBOOP_SIGN_ID:-}" ]; then
+  if security find-identity -v -p codesigning 2>/dev/null | grep -q "Keytamer Dev"; then
+    SIGN_ID="Keytamer Dev"
+  elif security find-identity -v -p codesigning 2>/dev/null | grep -q "Apple Development"; then
+    SIGN_ID="$(security find-identity -v -p codesigning 2>/dev/null | grep "Apple Development" | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')"
+  else
+    SIGN_ID="-"
+  fi
+else
+  SIGN_ID="${KEYTAMER_SIGN_ID:-${KEYBOOP_SIGN_ID}}"
+fi
 if [ "${KEYTAMER_RELEASE:-}" = "1" ] || [ "${KEYBOOP_RELEASE:-}" = "1" ]; then
   ENT="Keytamer.entitlements"
   CS_OPTS="--options runtime --timestamp"
