@@ -421,7 +421,7 @@ enum TextReplacer {
         for _ in 0..<8 {
             _ = CGEvent(keyboardEventSource: src, virtualKey: backspaceKey, keyDown: true)
             let e = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: true)
-            var u = Array("прогрев".utf16)
+            let u = Array("прогрев".utf16)
             u.withUnsafeBufferPointer { e?.keyboardSetUnicodeString(stringLength: $0.count, unicodeString: $0.baseAddress) }
         }
     }

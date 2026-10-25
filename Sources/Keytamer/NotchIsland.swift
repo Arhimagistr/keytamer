@@ -455,7 +455,7 @@ final class NotchIsland {
     /// плашки: без него в PNG вместо фигуры получается прямоугольник, то есть не то, что на экране.
     func silhouette() -> CGPath {
         let W = shape.bounds.width, totalH = shape.bounds.height
-        let nW = notch.width, nH = notch.height
+        let nW = notch.width
         let w = max(nW, min(drawnW, W))
 
         // ⚠️ ОСТРОВ — ЭТО ВЫРЕЗ, КОТОРЫЙ ВЫРОС, А НЕ ПАНЕЛЬ ПОД НИМ (автор 13.08, по живому виду:

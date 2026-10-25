@@ -1974,7 +1974,7 @@ final class Engine: EventTapHandler {
     ///   • слово не в исключениях пользователя.
     /// Caps Lock отдельно ловить не нужно: при нём слово будет заглавным целиком, а такое мы и так
     /// не трогаем из-за требования строчной третьей буквы.
-    private func fixTwoLeadingCaps(word: String, item: (word: String, tail: String, deleteCount: Int)) {
+    private func fixTwoLeadingCaps(word: String, item: (word: String, deleteCount: Int, tail: String)) {
         guard settings.twoCapsFix else { return }
         let ch = Array(word)
         guard ch.count >= 3 else { return }
@@ -2019,7 +2019,7 @@ final class Engine: EventTapHandler {
     ///   • только буквы одного алфавита, без цифр и знаков;
     ///   • слово не в пользовательских исключениях.
     /// Возвращаем как задумано: первая заглавная, остальные строчные.
-    private func fixCapsLockWord(word: String, item: (word: String, tail: String, deleteCount: Int)) -> Bool {
+    private func fixCapsLockWord(word: String, item: (word: String, deleteCount: Int, tail: String)) -> Bool {
         guard settings.typoFix else { return false }
         let ch = Array(word)
         // ⚠️ ОТ ПЯТИ БУКВ, А НЕ ОТ ТРЁХ (отзыв #156, 20.08.2026). Условие «первая строчная, остальные
@@ -2092,7 +2092,7 @@ final class Engine: EventTapHandler {
         return true
     }
 
-    private func fixTypo(word: String, item: (word: String, tail: String, deleteCount: Int)) {
+    private func fixTypo(word: String, item: (word: String, deleteCount: Int, tail: String)) {
         if fixCapsLockWord(word: word, item: item) { return }
         TypoFix.shared.noteTyped(word)
         guard let fixed = TypoFix.shared.suggest(word) else { return }

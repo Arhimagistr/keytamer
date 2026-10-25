@@ -187,7 +187,7 @@ final class AppBanner {
         let minW: CGFloat = compact ? 0 : 340
         var widthC: NSLayoutConstraint? = nil
         content.layoutSubtreeIfNeeded()
-        var w = min(max(content.fittingSize.width, minW), maxW)
+        let w = min(max(content.fittingSize.width, minW), maxW)
         if content.fittingSize.width > maxW || content.fittingSize.width < minW {
             widthC = content.widthAnchor.constraint(equalToConstant: w); widthC!.isActive = true
             content.layoutSubtreeIfNeeded()
