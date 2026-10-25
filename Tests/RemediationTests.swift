@@ -299,6 +299,42 @@ func testYAGNIRefactoringAndCompilerHygiene() {
     }
 }
 
+// MARK: - 6. Input Reliability and Protocol Hygiene (ADR-008)
+
+func testInputReliabilityAndProtocolHygiene() {
+    print("\n--- Test 6: Input Reliability and Protocol Hygiene ---")
+    let projectDir = "/Users/manar/AIII/projects/keytamer"
+    let textReplacerPath = "\(projectDir)/Sources/Keytamer/TextReplacer.swift"
+    let menuBarPath = "\(projectDir)/Sources/Keytamer/MenuBarController.swift"
+    let voiceIndicatorPath = "\(projectDir)/Sources/Keytamer/VoiceIndicator.swift"
+
+    // 1. TextReplacer dynamic paste keycode
+    if let trContent = try? String(contentsOf: URL(fileURLWithPath: textReplacerPath), encoding: .utf8) {
+        let hasHardcodedVKey = trContent.contains("private static let vKey: CGKeyCode = 9")
+        let hasDynamicVKey = trContent.contains("DynamicKeymap.latinKeyCodes[\"v\"]")
+        assertFalse(hasHardcodedVKey, "TextReplacer must not hardcode static vKey = 9")
+        assertTrue(hasDynamicVKey, "TextReplacer must resolve vKey dynamically via DynamicKeymap")
+    } else {
+        testFailures.append("Could not read TextReplacer.swift")
+    }
+
+    // 2. MenuBarController plateCache thread safety
+    if let mbContent = try? String(contentsOf: URL(fileURLWithPath: menuBarPath), encoding: .utf8) {
+        let hasPlateLock = mbContent.contains("plateLock") && (mbContent.contains("plateLock.lock()") || mbContent.contains("plateLock.withLock"))
+        assertTrue(hasPlateLock, "MenuBarController must guard plateCache access with plateLock")
+    } else {
+        testFailures.append("Could not read MenuBarController.swift")
+    }
+
+    // 3. VoiceIndicator screen parameters change notification
+    if let viContent = try? String(contentsOf: URL(fileURLWithPath: voiceIndicatorPath), encoding: .utf8) {
+        let listensToScreenChanges = viContent.contains("NSApplication.didChangeScreenParametersNotification")
+        assertTrue(listensToScreenChanges, "VoiceIndicator must observe NSApplication.didChangeScreenParametersNotification")
+    } else {
+        testFailures.append("Could not read VoiceIndicator.swift")
+    }
+}
+
 // MARK: - Main Runner
 
 print("=== KEYTAMER REMEDIATION SUITE ===")
@@ -307,6 +343,7 @@ testStoragePathsIsolation()
 testClipboardTransientTypeIntegrity()
 testRebrandingAndAssetIsolation()
 testYAGNIRefactoringAndCompilerHygiene()
+testInputReliabilityAndProtocolHygiene()
 
 print("\n=== SUMMARY ===")
 if testFailures.isEmpty {
