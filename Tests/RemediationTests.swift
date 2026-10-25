@@ -186,12 +186,76 @@ func testClipboardTransientTypeIntegrity() {
     assertFalse(setsTransientOnRestoredSnapshot, "TextReplacer must NOT set TransientType on restored user clipboard snapshot")
 }
 
+// MARK: - 4. Keytamer Rebranding and Asset Isolation (ADR-006)
+
+func testRebrandingAndAssetIsolation() {
+    print("\n--- Test 4: Keytamer Rebranding and Asset Isolation ---")
+    let projectDir = "/Users/manar/AIII/projects/keytamer"
+    let buildAppPath = "\(projectDir)/build-app.sh"
+    let keytamerMarkPath = "\(projectDir)/Sources/Keytamer/KeytamerMark.swift"
+    let keyboopMarkPath = "\(projectDir)/Sources/Keytamer/KeyboopMark.swift"
+    let menuBarPath = "\(projectDir)/Sources/Keytamer/MenuBarController.swift"
+    let loggerPath = "\(projectDir)/Sources/Keytamer/Logger.swift"
+    let voiceHistoryWindowPath = "\(projectDir)/Sources/Keytamer/VoiceHistoryWindow.swift"
+    let l10nPath = "\(projectDir)/Sources/Keytamer/L10n.swift"
+
+    // 1. build-app.sh must package keytamer-logo-anim.mp4
+    if let buildAppContent = try? String(contentsOf: URL(fileURLWithPath: buildAppPath), encoding: .utf8) {
+        let copiesKeytamerAnim = buildAppContent.contains("keytamer-logo-anim.mp4")
+        let copiesKeyboopAnim = buildAppContent.contains("keyboop-logo-anim.mp4")
+        assertTrue(copiesKeytamerAnim, "build-app.sh must copy keytamer-logo-anim.mp4")
+        assertFalse(copiesKeyboopAnim, "build-app.sh must NOT copy keyboop-logo-anim.mp4")
+    } else {
+        testFailures.append("Could not read build-app.sh")
+    }
+
+    // 2. KeytamerMark.swift must exist and KeyboopMark.swift must NOT exist
+    let fm = FileManager.default
+    assertTrue(fm.fileExists(atPath: keytamerMarkPath), "KeytamerMark.swift must exist")
+    assertFalse(fm.fileExists(atPath: keyboopMarkPath), "KeyboopMark.swift must NOT exist")
+
+    // 3. MenuBarController must call KeytamerMark.draw
+    if let menuBarContent = try? String(contentsOf: URL(fileURLWithPath: menuBarPath), encoding: .utf8) {
+        let usesKeytamerMark = menuBarContent.contains("KeytamerMark.draw")
+        let usesKeyboopMark = menuBarContent.contains("KeyboopMark.draw")
+        assertTrue(usesKeytamerMark, "MenuBarController must use KeytamerMark.draw")
+        assertFalse(usesKeyboopMark, "MenuBarController must NOT use KeyboopMark.draw")
+    } else {
+        testFailures.append("Could not read MenuBarController.swift")
+    }
+
+    // 4. Logger must not log "Keyboop: "
+    if let loggerContent = try? String(contentsOf: URL(fileURLWithPath: loggerPath), encoding: .utf8) {
+        let hasKeyboopLog = loggerContent.contains("NSLog(\"Keyboop:")
+        assertFalse(hasKeyboopLog, "Logger.swift must not log 'Keyboop:'")
+    } else {
+        testFailures.append("Could not read Logger.swift")
+    }
+
+    // 5. VoiceHistoryWindow export prefix must be Keytamer-
+    if let vhwContent = try? String(contentsOf: URL(fileURLWithPath: voiceHistoryWindowPath), encoding: .utf8) {
+        let hasKeyboopExport = vhwContent.contains("\"Keyboop-\\(exportDF")
+        assertFalse(hasKeyboopExport, "VoiceHistoryWindow must not export with 'Keyboop-' prefix")
+    } else {
+        testFailures.append("Could not read VoiceHistoryWindow.swift")
+    }
+
+    // 6. L10n.swift user-facing strings must use Keytamer
+    if let l10nContent = try? String(contentsOf: URL(fileURLWithPath: l10nPath), encoding: .utf8) {
+        let hasKeyboopInMicGain = l10nContent.contains("Keyboop поднимает уровень перед записью")
+        assertFalse(hasKeyboopInMicGain, "L10n.swift voice.micGainHelp must use Keytamer instead of Keyboop")
+    } else {
+        testFailures.append("Could not read L10n.swift")
+    }
+}
+
 // MARK: - Main Runner
 
 print("=== KEYTAMER REMEDIATION SUITE ===")
 testEventTapModifierOverrideDisarmBehavior()
 testStoragePathsIsolation()
 testClipboardTransientTypeIntegrity()
+testRebrandingAndAssetIsolation()
 
 print("\n=== SUMMARY ===")
 if testFailures.isEmpty {
