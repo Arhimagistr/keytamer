@@ -68,6 +68,9 @@ final class AppSettings {
     }
 
     private init() {
+        // Однократная бесшовная миграция настроек из Keyboop при первом старте Keytamer (ADR-010)
+        migrateFromKeyboopIfNeeded()
+
         // ⌥⇧ по умолчанию (modifier-only: keyCode = -1).
         let defaultMods = Int(CGEventFlags.maskAlternate.rawValue | CGEventFlags.maskShift.rawValue)
         d.register(defaults: [
@@ -136,6 +139,35 @@ final class AppSettings {
         if !ReleaseFeatures.slap {
             d.set(false, forKey: "slapEnabled")
         }
+    }
+
+    /// Однократная бесшовная миграция настроек из `ru.keyboop.app` при первом старте Keytamer (ADR-010).
+    func migrateFromKeyboopIfNeeded() {
+        guard !d.bool(forKey: "didMigrateFromKeyboop") else { return }
+        defer { d.set(true, forKey: "didMigrateFromKeyboop") }
+
+        guard let legacy = d.persistentDomain(forName: "ru.keyboop.app"), !legacy.isEmpty else { return }
+
+        // Черный список системных/бандл-специфичных ключей, которые не переносятся
+        let ignoredKeyPrefixes = ["SU", "NSWindow Frame", "NSNav"]
+        let ignoredExactKeys: Set<String> = [
+            "lastRunVersion",
+            "lastCrashScanAt",
+            "NSStatusItem Preferred Position Item-0",
+            "NSStatusItem Visible Item-0",
+            "NSOSPLastRootDirectory"
+        ]
+
+        for (key, val) in legacy {
+            if ignoredExactKeys.contains(key) { continue }
+            if ignoredKeyPrefixes.contains(where: { key.hasPrefix($0) }) { continue }
+
+            // Переносим только если ключ еще не был явно сохранен в Keytamer
+            if d.object(forKey: key) == nil {
+                d.set(val, forKey: key)
+            }
+        }
+        kbLog("settings: выполнена миграция \(legacy.count) параметров из ru.keyboop.app в Keytamer")
     }
 
     var autoEnabled: Bool { get { d.bool(forKey: Key.auto) } set { d.set(newValue, forKey: Key.auto) } }
