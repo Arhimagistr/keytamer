@@ -358,6 +358,32 @@ func testCoexistenceModeWithKeyboopLock() {
     assertTrue(logsCoexistence, "AppDelegate.swift must log parallel coexistence mode when Keyboop is detected")
 }
 
+// MARK: - 8. Settings Migration from Keyboop (ADR-010)
+
+func testKeyboopSettingsMigration() {
+    print("\n--- Test 8: Settings Migration from Keyboop (ADR-010) ---")
+    let appSettingsPath = "/Users/manar/AIII/projects/keytamer/Sources/Keytamer/AppSettings.swift"
+    guard let asContent = try? String(contentsOf: URL(fileURLWithPath: appSettingsPath), encoding: .utf8) else {
+        testFailures.append("Could not read AppSettings.swift")
+        return
+    }
+
+    // 1. Must define migration flag and migration method
+    let hasMigrationMethod = asContent.contains("func migrateFromKeyboopIfNeeded()")
+    assertTrue(hasMigrationMethod, "AppSettings must define migrateFromKeyboopIfNeeded()")
+
+    let checksMigrationFlag = asContent.contains("didMigrateFromKeyboop")
+    assertTrue(checksMigrationFlag, "AppSettings must check didMigrateFromKeyboop flag")
+
+    // 2. Must inspect persistentDomain for ru.keyboop.app
+    let readsKeyboopDomain = asContent.contains("persistentDomain(forName: \"ru.keyboop.app\")")
+    assertTrue(readsKeyboopDomain, "AppSettings must read ru.keyboop.app persistentDomain")
+
+    // 3. Must be invoked during initialization
+    let callsMigrationInInit = asContent.contains("migrateFromKeyboopIfNeeded()")
+    assertTrue(callsMigrationInInit, "AppSettings must invoke migrateFromKeyboopIfNeeded() during init")
+}
+
 // MARK: - Main Runner
 
 print("=== KEYTAMER REMEDIATION SUITE ===")
@@ -368,6 +394,7 @@ testRebrandingAndAssetIsolation()
 testYAGNIRefactoringAndCompilerHygiene()
 testInputReliabilityAndProtocolHygiene()
 testCoexistenceModeWithKeyboopLock()
+testKeyboopSettingsMigration()
 
 print("\n=== SUMMARY ===")
 if testFailures.isEmpty {
