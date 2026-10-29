@@ -1042,6 +1042,7 @@ final class EventTap {
             let down = !flags.intersection(optMask).isEmpty
             let solo = relevantMods(flags).subtracting(relevantMods(optMask)).isEmpty
             if isOptKey && down && solo && !VoiceController.shared.isRecording {
+                pendingVoiceWorkItem?.cancel(); pendingVoiceWorkItem = nil
                 let now = CACurrentMediaTime()
                 if now - lastPasteDictationTap < 0.28 && !otherKeyDuringPasteTap {
                     pasteDictationTapCount += 1
@@ -1053,8 +1054,6 @@ final class EventTap {
                 if pasteDictationTapCount >= targetCount {
                     pasteDictationTapCount = 0
                     lastPasteDictationTap = 0
-                    pendingVoiceWorkItem?.cancel()
-                    pendingVoiceWorkItem = nil
                     suppressVoiceOnNextUp = true
                     voiceModArmed = false
                     onMain { [weak self] in self?.handler?.handlePasteDictationHotkey() }
@@ -1110,7 +1109,8 @@ final class EventTap {
                     } else if voiceModArmed {
                         voiceModArmed = false
                         let isOver = voiceModArmedOverride
-                        if s.pasteDictationDoubleTap && !VoiceGate.isActive {
+                        let isMultiTapPaste = (s.pasteDictationTrigger == "doubletap" || s.pasteDictationTrigger == "tripletap")
+                        if isMultiTapPaste && !VoiceGate.isActive {
                             pendingVoiceWorkItem?.cancel()
                             let work = DispatchWorkItem { [weak self] in
                                 self?.toggleVoice(override: isOver)

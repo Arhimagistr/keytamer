@@ -584,6 +584,23 @@ func testUniversalTriggersAndZeroLossCancel() {
     // 5. SettingsWindow: voice pause presets and recording
     let swHasPausePresets = swContent.contains("voicePausePresets") || swContent.contains("startVoicePauseHotkeyRecording")
     assertTrue(swHasPausePresets, "SettingsWindow must provide voice pause presets and custom hotkey recording")
+
+    // 6. DEF-05 & DEF-06: EventTap tripletap arbitration check & intermediate cancel
+    let viPath = "\(projectDir)/Sources/Keytamer/VoiceIndicator.swift"
+    guard let viContent = try? String(contentsOf: URL(fileURLWithPath: viPath), encoding: .utf8) else {
+        testFailures.append("Could not read VoiceIndicator.swift for Test 11")
+        return
+    }
+
+    let etHasMultiTapArbitration = etContent.contains("pasteDictationTrigger == \"tripletap\"") && etContent.contains("isMultiTapPaste")
+    assertTrue(etHasMultiTapArbitration, "EventTap must include tripletap in arbitration check (DEF-05)")
+
+    let etCancelsOnEveryTap = etContent.contains("pendingVoiceWorkItem?.cancel(); pendingVoiceWorkItem = nil")
+    assertTrue(etCancelsOnEveryTap, "EventTap must cancel pending voice item on every tap in multi-tap sequence (DEF-06)")
+
+    // 7. DEF-07: VoiceIndicator must compensate total paused duration in timer
+    let viCompensatesPause = viContent.contains("totalPausedDuration") || viContent.contains("pauseStartTime")
+    assertTrue(viCompensatesPause, "VoiceIndicator must track and compensate paused duration in elapsed timer (DEF-07)")
 }
 
 // MARK: - Main Runner

@@ -171,6 +171,9 @@ final class VoiceIndicator {
         DispatchQueue.main.async {
             self.liveText = ""
             self.recStart = Date()
+            self.totalPausedDuration = 0
+            self.pauseStartTime = nil
+            self.isPausedIndicator = false
             self.present("", .recording)
         }
     }
@@ -229,6 +232,9 @@ final class VoiceIndicator {
             self.presentGen += 1          // всё отложенное, что целилось в текущий показ, отменяется
             self.stopTimers(); self.wave.stop()
             self.recStart = nil; self.liveText = ""
+            self.totalPausedDuration = 0
+            self.pauseStartTime = nil
+            self.isPausedIndicator = false
             self.toastAction = nil
             self.label.onClick = nil
             self.panel?.ignoresMouseEvents = true
@@ -243,18 +249,26 @@ final class VoiceIndicator {
         DispatchQueue.main.async { guard self.mode == .recording, self.onScreen else { return }; self.wave.push(rms) }
     }
 
-    /// Отображение состояния паузы записи
+    /// Отображение состояния паузы записи и компенсация длительности (DEF-07)
     private var isPausedIndicator: Bool = false
+    private var totalPausedDuration: TimeInterval = 0
+    private var pauseStartTime: Date? = nil
+
     func setPaused(_ paused: Bool) {
         DispatchQueue.main.async {
             guard self.mode == .recording, self.onScreen else { return }
             self.isPausedIndicator = paused
             if paused {
+                self.pauseStartTime = Date()
                 self.ticker?.invalidate()
                 self.ticker = nil
                 self.label.stringValue = L10n.t("voice.paused")
                 self.wave.stop()
             } else {
+                if let pStart = self.pauseStartTime {
+                    self.totalPausedDuration += Date().timeIntervalSince(pStart)
+                    self.pauseStartTime = nil
+                }
                 self.label.stringValue = L10n.t("voice.listening")
                 self.wave.start(shimmer: false)
                 self.startTicker()
@@ -600,7 +614,13 @@ final class VoiceIndicator {
     /// «0:07», «1:42», «12:05». Минуты не обрезаем: диктовка на час это странно, но врать про неё
     /// хуже, чем показать «63:20».
     private func elapsedString() -> String {
-        let s = Int(Date().timeIntervalSince(recStart ?? Date()))
+        let now = Date()
+        var paused = totalPausedDuration
+        if let pStart = pauseStartTime {
+            paused += now.timeIntervalSince(pStart)
+        }
+        let total = (recStart != nil) ? now.timeIntervalSince(recStart!) : 0
+        let s = max(0, Int(total - paused))
         return String(format: "%d:%02d", s / 60, s % 60)
     }
 
