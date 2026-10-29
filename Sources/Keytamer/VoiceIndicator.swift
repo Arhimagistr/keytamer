@@ -252,7 +252,7 @@ final class VoiceIndicator {
                 self.wave.stop()
             } else {
                 self.label.stringValue = L10n.t("voice.listening")
-                self.wave.start()
+                self.wave.start(shimmer: false)
             }
             self.relayout(text: self.label.stringValue, showWave: true)
         }
