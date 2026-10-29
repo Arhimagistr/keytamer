@@ -384,6 +384,53 @@ func testKeyboopSettingsMigration() {
     assertTrue(callsMigrationInInit, "AppSettings must invoke migrateFromKeyboopIfNeeded() during init")
 }
 
+// MARK: - 9. Dictation Pause, Command Cancel, 2x Option Paste (ADR-011)
+
+func testDictationPauseCancelAndDoubleTapPaste() {
+    print("\n--- Test 9: Dictation Pause, Command Cancel, 2x Option Paste (ADR-011) ---")
+    let projectDir = "/Users/manar/AIII/projects/keytamer"
+    let recorderPath = "\(projectDir)/Sources/Keytamer/AudioRecorder.swift"
+    let voiceControllerPath = "\(projectDir)/Sources/Keytamer/VoiceController.swift"
+    let eventTapPath = "\(projectDir)/Sources/Keytamer/EventTap.swift"
+    let appSettingsPath = "\(projectDir)/Sources/Keytamer/AppSettings.swift"
+
+    guard let recContent = try? String(contentsOf: URL(fileURLWithPath: recorderPath), encoding: .utf8),
+          let vcContent = try? String(contentsOf: URL(fileURLWithPath: voiceControllerPath), encoding: .utf8),
+          let etContent = try? String(contentsOf: URL(fileURLWithPath: eventTapPath), encoding: .utf8),
+          let asContent = try? String(contentsOf: URL(fileURLWithPath: appSettingsPath), encoding: .utf8) else {
+        testFailures.append("Could not read project source files for Test 9")
+        return
+    }
+
+    // 1. AudioRecorder pause and resume
+    let recHasPause = recContent.contains("func pause()") && recContent.contains("func resume()")
+    assertTrue(recHasPause, "AudioRecorder must provide pause() and resume() methods")
+
+    let recHasIsPaused = recContent.contains("var isPaused: Bool")
+    assertTrue(recHasIsPaused, "AudioRecorder must provide isPaused property")
+
+    // 2. VoiceController togglePause
+    let vcHasTogglePause = vcContent.contains("func togglePause()")
+    assertTrue(vcHasTogglePause, "VoiceController must provide togglePause() method")
+
+    let vcHasIsPaused = vcContent.contains("var isPaused: Bool")
+    assertTrue(vcHasIsPaused, "VoiceController must expose isPaused property")
+
+    // 3. EventTap pause and cancel handling
+    let etHandlesPause = etContent.contains("togglePause")
+    assertTrue(etHandlesPause, "EventTap must route pause key to VoiceController.togglePause()")
+
+    let etHandlesCommandCancel = etContent.contains("voiceCancelByCommand") || etContent.contains("cancelOnCommand")
+    assertTrue(etHandlesCommandCancel, "EventTap must support cancelling dictation on Command")
+
+    // 4. Double-tap Option paste
+    let asHasDoubleTapPaste = asContent.contains("pasteDictationTrigger") || asContent.contains("pasteDictationDoubleTap")
+    assertTrue(asHasDoubleTapPaste, "AppSettings must support double-tap trigger for paste dictation")
+
+    let etHasDoubleTapPaste = etContent.contains("handlePasteDictationHotkey") && (etContent.contains("pasteDictationTrigger") || etContent.contains("pasteDictationDoubleTap"))
+    assertTrue(etHasDoubleTapPaste, "EventTap must handle double-tap for paste dictation")
+}
+
 // MARK: - Main Runner
 
 print("=== KEYTAMER REMEDIATION SUITE ===")
@@ -395,6 +442,7 @@ testYAGNIRefactoringAndCompilerHygiene()
 testInputReliabilityAndProtocolHygiene()
 testCoexistenceModeWithKeyboopLock()
 testKeyboopSettingsMigration()
+testDictationPauseCancelAndDoubleTapPaste()
 
 print("\n=== SUMMARY ===")
 if testFailures.isEmpty {
