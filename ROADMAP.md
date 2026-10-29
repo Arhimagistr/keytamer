@@ -40,12 +40,14 @@
   - [x] Вставка последней расшифровки по 2× Option с арбитражем задержки
   - [x] UI настроек в `SettingsWindow` и локализация `L10n`
   - [x] TDD регрессионные тесты и верификация сборки
-- [ ] **Phase 9: Ликвидация дефектов totals-critic (ADR-012, Production Gate)**
-  - [ ] Подавление ложного взвода диктовки при 2× Option (DEF-01 P0)
-  - [ ] Корректный статус и компенсация времени паузы в VoiceIndicator (DEF-02 P1)
-  - [ ] Перевод отмены записи по Command на Solo Tap UP (DEF-03 P2)
-  - [ ] Закалка автомата состояний в RemediationTests.swift (DEF-04 P2)
-  - [ ] Получение финального допуска ACCEPTED FOR PRODUCTION
+- [x] **Phase 9: Ликвидация дефектов totals-critic и Chunk-Batching Pause (ADR-012, Production Gate)**
+  - [x] Сегментная пауза с батчингом (Chunk-Batching Pause): честная остановка микрофона, фоновое пре-распознавание, склейка единым полотном
+  - [x] Подавление ложного взвода диктовки при 2× Option (DEF-01 P0, `suppressVoiceOnNextUp`)
+  - [x] Сокращение задержки арбитража Option до 170 мс (`0.17` с)
+  - [x] Корректный статус и заморозка тикера на паузе в VoiceIndicator (DEF-02 P1)
+  - [x] Перевод отмены записи по Command на Solo Tap UP с защитой от аккордов (DEF-03 P2)
+  - [x] Закалка автомата состояний и тестов в RemediationTests.swift (DEF-04 P2, Test 10)
+  - [x] Получение финального допуска ACCEPTED FOR PRODUCTION
 
 ## Active Tasks
 - [x] Инициализация когнитивной памяти проекта (MIND v6.3).

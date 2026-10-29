@@ -144,6 +144,8 @@ final class EventTap {
     private var warnedBareInstantSwitch = false
     private var lastPasteDictationTap: CFTimeInterval = 0
     private var otherKeyDuringPasteTap = false
+    private var suppressVoiceOnNextUp = false
+    private var cmdCancelArmed = false
     private var pendingVoiceWorkItem: DispatchWorkItem?
 
     /// ПАРНОСТЬ ГЛОТАНИЙ. keyCode'ы, у которых мы проглотили keyDown → обязаны проглотить и keyUp.
@@ -531,6 +533,7 @@ final class EventTap {
             pendingVoiceWorkItem?.cancel(); pendingVoiceWorkItem = nil
             fnArmed = false   // Fn+клавиша = комбинация (F1/стрелки/яркость), а не тап по 🌐
             voiceModArmed = false   // обычная клавиша при зажатом модификаторе — это аккорд, не тап
+            cmdCancelArmed = false  // аккорд с Command — не отменять запись на отпускании Command (DEF-03)
             // ЗАПИСЬ КОМБИНАЦИИ В НАСТРОЙКАХ: пропускаем нажатие насквозь, не перехватывая свои
             // хоткеи. Иначе tap глотал ровно то, что человек пытается назначить (уже назначенную
             // комбинацию), запускал СТАРОЕ действие, а окно настроек не получало событие —
@@ -982,21 +985,26 @@ final class EventTap {
         // сочли проверку ненужной: у Fn отдельный флаг, но соседей по нему это не отменяет.
         else if !relevantMods(flags).isEmpty { fnArmed = false }
 
-        // Отмена активной записи диктовки по одиночному клику Command (ADR-011)
+        // Отмена активной записи диктовки по одиночному клику Command (ADR-011 / DEF-03)
         if s.voiceCancelByCommand, VoiceController.shared.isRecording {
-            let isCmdKey = (keyCode == 54 || keyCode == 55)
+            let isCmdKey = (keyCode == 54 || keyCode == 55) || keyCodeMatchesMask(keyCode, .maskCommand)
             let hasCmd = !flags.intersection(.maskCommand).isEmpty
             let soloCmd = relevantMods(flags).subtracting([.maskCommand]).isEmpty
-            if isCmdKey && hasCmd && soloCmd {
-                voiceModArmed = false
-                voiceActive = false
-                VoiceGate.set(false)
-                onMain { VoiceController.shared.cancel() }
-                return true
+            if isCmdKey {
+                if hasCmd && soloCmd {
+                    cmdCancelArmed = true
+                } else if !hasCmd && cmdCancelArmed {
+                    cmdCancelArmed = false
+                    voiceModArmed = false
+                    voiceActive = false
+                    VoiceGate.set(false)
+                    onMain { VoiceController.shared.cancel() }
+                    return true
+                }
             }
         }
 
-        // Двойное нажатие Option для вставки последней диктовки (ADR-011)
+        // Двойное нажатие Option для вставки последней диктовки (ADR-011 / DEF-01)
         if s.pasteDictationDoubleTap {
             let optMask = CGEventFlags.maskAlternate
             let isOptKey = (keyCode == 58 || keyCode == 61) || keyCodeMatchesMask(keyCode, optMask)
@@ -1008,6 +1016,8 @@ final class EventTap {
                     lastPasteDictationTap = 0
                     pendingVoiceWorkItem?.cancel()
                     pendingVoiceWorkItem = nil
+                    suppressVoiceOnNextUp = true
+                    voiceModArmed = false
                     onMain { [weak self] in self?.handler?.handlePasteDictationHotkey() }
                 } else {
                     lastPasteDictationTap = now
@@ -1057,18 +1067,23 @@ final class EventTap {
                 if down {
                     voiceModArmed = soloVoiceTap || overrideVoiceTap
                     voiceModArmedOverride = overrideVoiceTap
-                } else if voiceModArmed {
-                    voiceModArmed = false
-                    let isOver = voiceModArmedOverride
-                    if s.pasteDictationDoubleTap && !VoiceGate.isActive {
-                        pendingVoiceWorkItem?.cancel()
-                        let work = DispatchWorkItem { [weak self] in
-                            self?.toggleVoice(override: isOver)
+                } else {
+                    if suppressVoiceOnNextUp {
+                        suppressVoiceOnNextUp = false
+                        voiceModArmed = false
+                    } else if voiceModArmed {
+                        voiceModArmed = false
+                        let isOver = voiceModArmedOverride
+                        if s.pasteDictationDoubleTap && !VoiceGate.isActive {
+                            pendingVoiceWorkItem?.cancel()
+                            let work = DispatchWorkItem { [weak self] in
+                                self?.toggleVoice(override: isOver)
+                            }
+                            pendingVoiceWorkItem = work
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.17, execute: work)
+                        } else {
+                            toggleVoice(override: isOver)
                         }
-                        pendingVoiceWorkItem = work
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
-                    } else {
-                        toggleVoice(override: isOver)
                     }
                 }
             } else {

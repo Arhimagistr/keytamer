@@ -221,22 +221,78 @@ final class VoiceController {
     /// Зовётся, когда диктовку нажали, а модели нет — UI предложит скачать.
     var onNeedModel: (() -> Void)?
 
-    /// Флаг состояния паузы текущей записи
-    var isPaused: Bool { recorder.isPaused }
+    /// Chunk-Batching Pause (ADR-012)
+    private var isSessionPaused: Bool = false
+    private var sessionTextSegments: [String] = []
+    private var pendingSegmentTasks: [Task<String, Never>] = []
+    private var sessionAudioSamples: [Float] = []
 
-    /// Переключение паузы текущей активной записи (ADR-011)
+    /// Флаг состояния паузы текущей записи
+    var isPaused: Bool { isSessionPaused }
+
+    /// Изолированная транскрибация отдельного аудио-сегмента
+    private func transcribeSegmentSamples(_ samples: [Float], lang: String, useParakeet: Bool) async -> String {
+        guard !samples.isEmpty else { return "" }
+        if useParakeet {
+            let ok = await ParakeetEngine.shared.loadIfNeeded()
+            let out = ok ? await ParakeetEngine.shared.transcribe(samples: samples, language: lang) : nil
+            if let out, !out.isEmpty { return out }
+            if await MainActor.run(body: { self.modelInstalled }) {
+                return await withCheckedContinuation { (c: CheckedContinuation<String, Never>) in
+                    self.transcribeQueue.async { [weak self] in
+                        guard let self else { return c.resume(returning: "") }
+                        self.loadModelIfNeeded()
+                        let t = self.whisper?.transcribe(samples: samples, language: lang) ?? ""
+                        c.resume(returning: t)
+                    }
+                }
+            }
+            return ""
+        } else {
+            return await withCheckedContinuation { (c: CheckedContinuation<String, Never>) in
+                self.transcribeQueue.async { [weak self] in
+                    guard let self else { return c.resume(returning: "") }
+                    self.loadModelIfNeeded()
+                    let t = self.whisper?.transcribe(samples: samples, language: lang) ?? ""
+                    c.resume(returning: t)
+                }
+            }
+        }
+    }
+
+    /// Переключение паузы текущей активной записи с остановкой микрофона и фоновым батчингом (ADR-012)
     func togglePause() {
         guard isRecording else { return }
-        if recorder.isPaused {
-            recorder.resume()
-            playCue(startSound)
-            VoiceIndicator.shared.setPaused(false)
-            kbLog("voice: запись возобновлена")
+        if isSessionPaused {
+            // Возобновление записи после паузы
+            do {
+                try recorder.start()
+                isSessionPaused = false
+                playCue(startSound)
+                VoiceIndicator.shared.setPaused(false)
+                kbLog("voice: запись возобновлена после паузы (сегментов накоплено: \(sessionTextSegments.count + pendingSegmentTasks.count))")
+            } catch {
+                kbLog("voice: ошибка возобновления записи: \(error)")
+            }
         } else {
-            recorder.pause()
-            playCue(stopSound)
+            // Честная остановка микрофона при паузе
+            guard recorder.isRecording else { return }
+            let samples = recorder.stop()
+            isSessionPaused = true
             VoiceIndicator.shared.setPaused(true)
-            kbLog("voice: запись поставлена на паузу")
+            playCue(stopSound)
+            sessionAudioSamples.append(contentsOf: samples)
+            let rms = samples.isEmpty ? 0 : (samples.map { $0 * $0 }.reduce(0, +) / Float(samples.count)).squareRoot()
+            kbLog("voice: пауза (остановлен микрофон, \(samples.count) сэмплов, RMS=\(String(format: "%.4f", rms)))")
+            if rms > 0.001 && samples.count > 1600 {
+                let lang = languageForWhisper()
+                let useParakeet = settings.voiceEngine == "parakeet" && ParakeetEngine.modelInstalled
+                let task = Task<String, Never> { [weak self] in
+                    guard let self else { return "" }
+                    return await self.transcribeSegmentSamples(samples, lang: lang, useParakeet: useParakeet)
+                }
+                pendingSegmentTasks.append(task)
+            }
         }
     }
 
@@ -247,7 +303,11 @@ final class VoiceController {
     func begin(override: Bool = false) {
         guard settings.voiceEnabled else { return }
         if starting { kbLog("voice: begin пропущен — старт уже идёт"); return }
-        if recorder.isRecording { kbLog("voice: begin пропущен — запись уже идёт"); return }
+        if recorder.isRecording || isSessionPaused { kbLog("voice: begin пропущен — запись уже идёт"); return }
+        isSessionPaused = false
+        sessionTextSegments.removeAll()
+        pendingSegmentTasks.removeAll()
+        sessionAudioSamples.removeAll()
         VoiceGate.set(true)            // СИНХРОННО: намерение записывать — toggle сразу видит активность
         starting = true
         abortStart = false
@@ -320,154 +380,94 @@ final class VoiceController {
     /// Отпустили хоткей — стоп, транскрипция, вставка.
     func end() {
         // Отпустили/нажали стоп ДО того как async-begin реально завёл запись — прерываем старт.
-        if starting && !recorder.isRecording {
+        if starting && !recorder.isRecording && !isSessionPaused {
             abortStart = true; VoiceGate.set(false); dropPendingHistoryOnly()
             kbLog("voice: end во время старта — прерываю запуск (запись ещё не пошла)")
             return
         }
-        guard recorder.isRecording else { VoiceGate.set(false); dropPendingHistoryOnly(); return }
+        guard isRecording else { VoiceGate.set(false); dropPendingHistoryOnly(); return }
         stopLiveDraft()
         VoiceIndicator.shared.setPaused(false)
         if streamingActive { streamEnd(); return }   // потоковый путь: финализируем стрим
         noteSendGesture()         // правый ⌘ в момент отпускания = «отправить» (задача 124)
-        let samples = recorder.stop()
-        // Отсчёт «сколько человек ждал»: от отпускания клавиши до текста в поле. Время самого
-        // whisper пишет WhisperBridge, но оно отвечает лишь за часть ожидания, а спрашивают всегда
-        // про всё ожидание целиком.
+
+        var tailSamples: [Float] = []
+        if recorder.isRecording {
+            tailSamples = recorder.stop()
+            sessionAudioSamples.append(contentsOf: tailSamples)
+        }
+        isSessionPaused = false
+
         stopStamp = CFAbsoluteTimeGetCurrent()
         VoiceGate.set(false)      // ЗАПИСЬ окончена → можно сразу начинать НОВУЮ (транскрипция идёт в фоне)
         playCue(stopSound)    // нисходящее «тук-тук» — запись остановлена (до транскрипции)
-        let rms = samples.isEmpty ? 0 : (samples.map { $0 * $0 }.reduce(0, +) / Float(samples.count)).squareRoot()
-        kbLog("voice: \(samples.count) сэмплов, \(String(format: "%.1f", recorder.duration))с, RMS=\(String(format: "%.4f", rms))")
-        // ⚠️ ПОМЕТКА «ТОЛЬКО В ИСТОРИЮ» ОБЯЗАНА СНИМАТЬСЯ НА КАЖДОМ ВЫХОДЕ ОТСЮДА (баг-репорт,
-        // 03.08.2026, подтверждён логом трижды).
-        //
-        // Симптом: диктовка распознана, лежит в истории, копируется, но в поле не вставилась.
-        // Причина: отмена по Escape метит СЛЕДУЮЩЕЕ поколение (`transcribeGen + 1`) в расчёте, что
-        // его заберёт текущая запись. Но если запись до расшифровки не доходит — а после случайного
-        // Escape она как раз почти всегда тихая, потому что человек уже молчит — поколение никто не
-        // забирает, и метка висит. Её подбирает следующая, ни в чём не повинная диктовка, и молча
-        // уезжает в историю вместо поля. В логе это выглядело так:
-        //   16:51:40  отмена (Escape)
-        //   16:51:40  тишина — пропуск            ← поколение не создано, метка осталась
-        //   16:52:00  отменённая диктовка сохранена, 45 симв.   ← съело ЧУЖУЮ диктовку
-        // Разрыв доходил до двух минут, поэтому связь никак не читалась.
-        //
-        // Escape тут не виноват: у автора хоткей диктовки ⌥`, а тильда прямо под Escape, задеть её
-        // проще простого. Цена случайного нажатия должна быть нулевой, а не «съем следующую».
-        //
-        // ⚠️ Снимаем метку ТОЛЬКО в ветках раннего выхода, а НЕ здесь, до проверок. Отмена по
-        // Escape зовёт `end()` сразу после того, как поставила метку, и снятие в начале функции
-        // убило бы саму функцию «Отменённую всё равно сохранять»: текст поехал бы в поле, чего
-        // человек как раз и не просил.
 
-        // Слишком короткое нажатие (< 0.3 c) — просто отмена, без шума.
-        guard recorder.duration >= 0.3 else {
+        let totalSamples = sessionAudioSamples.isEmpty ? tailSamples : sessionAudioSamples
+        let rms = totalSamples.isEmpty ? 0 : (totalSamples.map { $0 * $0 }.reduce(0, +) / Float(totalSamples.count)).squareRoot()
+        let hasSegments = !pendingSegmentTasks.isEmpty || !sessionTextSegments.isEmpty
+        kbLog("voice: всего \(totalSamples.count) сэмплов, RMS=\(String(format: "%.4f", rms)), сегментов в очереди=\(pendingSegmentTasks.count)")
+
+        // Слишком короткое нажатие (< 0.3 c) без сегментов — просто отмена, без шума.
+        guard hasSegments || totalSamples.count >= 4800 else {
             dropPendingHistoryOnly()
-            kbLog("voice: слишком коротко (\(String(format: "%.2f", recorder.duration))с) — отмена")
-            recorder.releaseNow()   // отзыв #114: отброшенный подход не должен держать микрофон тёплым
+            pendingSegmentTasks.removeAll()
+            sessionTextSegments.removeAll()
+            sessionAudioSamples.removeAll()
+            kbLog("voice: слишком коротко — отмена")
+            recorder.releaseNow()
             refreshIndicator(); return
         }
-        // Тишина (нет сигнала) — не зовём whisper (иначе галлюцинации «Продолжение следует»).
-        guard rms > 0.001 else {
+        // Тишина (нет сигнала) без сегментов — не зовём whisper
+        guard hasSegments || rms > 0.001 else {
             dropPendingHistoryOnly()
-            kbLog("voice: тишина (RMS \(String(format: "%.4f", rms))) — пропуск (микрофон молчал — мог быть занят другим приложением)")
-            recorder.releaseNow()   // то же, что и у слишком короткой: держать микрофон не за чем
+            pendingSegmentTasks.removeAll()
+            sessionTextSegments.removeAll()
+            sessionAudioSamples.removeAll()
+            kbLog("voice: тишина (RMS \(String(format: "%.4f", rms))) — пропуск")
+            recorder.releaseNow()
             refreshIndicator(); playCue(failSound)
             return
         }
+
         let lang = languageForWhisper()
         let useParakeet = settings.voiceEngine == "parakeet" && ParakeetEngine.modelInstalled
-        // Холодный whisper (модели нет в памяти): загрузка крупной модели с незакэшированного
-        // диска — секунды-десятки секунд, и она не должна съедать бюджет сторожа транскрипции.
-        // ⚠️ ХОЛОДНАЯ ЗАГРУЗКА СЧИТАЕТСЯ ДЛЯ ОБОИХ ДВИЖКОВ (фикс 30.07). Раньше здесь стояло
-        // `!useParakeet && whisper == nil`, то есть бюджет на загрузку получал ТОЛЬКО whisper, а у
-        // паракита флаг не поднимался никогда. Между тем именно его первая загрузка самая долгая:
-        // CoreML компилирует модель под ANE, замеры 37.5с (30.07) и 43с (21.07). Сторож при этом
-        // давал 15 секунд, и первая диктовка после холодного паракита была не «медленной», а
-        // ГАРАНТИРОВАННО потерянной: текст распознавался и приходил, но его отбрасывали как поздний.
-        // Воспроизводится не на старте (там греет preload), а при смене движка в настройках на ходу.
         let cold = useParakeet ? !ParakeetEngine.shared.ready : (whisper == nil)
         let gen = beginTranscription(duration: recorder.duration, coldLoad: cold)
-        refreshIndicator()   // НЕ setState(.processing) напрямую: отменённую диктовку считаем молча
+        refreshIndicator()
 
-        // Диагностика «почему медленно»: сразу видно, на каком движке распознаём и почему НЕ Parakeet
-        // (whisper на CPU/Metal растёт с длиной аудио; Parakeet на ANE — почти мгновенный). Если тут
-        // whisper при voiceEngine=parakeet — значит модель Parakeet не скачана (parakeetInstalled=false).
-        kbLog("voice: движок=\(useParakeet ? "parakeet/ANE" : "whisper/CPU") · выбран=\(settings.voiceEngine) parakeetInstalled=\(ParakeetEngine.modelInstalled) whisperModel=\(settings.voiceModel)")
-        if useParakeet {
-            Task { [weak self] in
-                guard let self else { return }
-                let ok = await ParakeetEngine.shared.loadIfNeeded()
-                // Язык передаём и в parakeet (03.08.2026). Раньше не передавали вовсе, и выбор
-                // языка в настройках для этого движка не делал НИЧЕГО. Он и сейчас не выбирает
-                // язык (модель этого не умеет), но включает фильтр по письменности — см. подробный
-                // комментарий в ParakeetEngine.transcribe.
-                let out = ok ? await ParakeetEngine.shared.transcribe(samples: samples, language: lang) : nil
-                var text = out ?? ""
-                kbLog("voice: parakeet(готов=\(ok), язык=\(lang)) → \(out.map { "\($0.count) симв." } ?? "ОТКАЗ")")
-                // ⚠️ ОТКАЗ ДВИЖКА → ДОКАНЧИВАЕМ ЗАПИСЬ ВТОРЫМ ДВИЖКОМ, А НЕ ОТДАЁМ ПУСТОТУ.
-                // Отзыв #161 (21.08.2026): у человека на macOS 14 модель Parakeet падала в CoreML на
-                // КАЖДОЙ диктовке («Encoder_main__Op8_Cast has timed out»), и все девять часов он
-                // видел только «Распознаю» и пустоту после. Записанный звук при этом целый, второй
-                // движок у нас есть, и молчать в такой ситуации нечем оправдать.
-                // Настройку человека НЕ трогаем: движок остаётся выбранным, подменяем только эту
-                // попытку. Выбор движка это его решение, а не наше.
-                if out == nil {
-                    // ⚠️ ВТОРАЯ МОДЕЛЬ МОЖЕТ БЫТЬ ПРОСТО НЕ СКАЧАНА, и тогда «подмена» это та же
-                    // тишина этажом ниже (замечание автора 21.08). Whisper весит от 466 МБ до 1.6 ГБ,
-                    // тянуть их за человека без спроса нельзя: это его трафик и его диск.
-                    if await MainActor.run(body: { self.modelInstalled }) {
-                        text = await withCheckedContinuation { (c: CheckedContinuation<String, Never>) in
-                            self.transcribeQueue.async { [weak self] in
-                                guard let self else { return c.resume(returning: "") }
-                                self.loadModelIfNeeded()
-                                let t = self.whisper?.transcribe(samples: samples, language: lang) ?? ""
-                                kbLog("voice: parakeet отказал — доканчиваю whisper'ом, \(t.count) симв.")
-                                c.resume(returning: t)
-                            }
-                        }
-                    } else {
-                        kbLog("voice: parakeet отказал, а модели Whisper на диске нет — говорю человеку")
-                    }
-                    // ⚠️ ОДИН РАЗ ЗА ЗАПУСК, А НЕ НА КАЖДУЮ ДИКТОВКУ. Отказ этот постоянный (зависит
-                    // от версии macOS), и тост на каждую фразу превратился бы в травлю. Но сказать
-                    // ОДИН раз обязательно: подмена молча делает распознавание в разы медленнее, и
-                    // человек имеет право знать, почему.
-                    if !Self.parakeetFallbackTold {
-                        Self.parakeetFallbackTold = true
-                        let key = text.isEmpty ? "voice.parakeetNoAlt" : "voice.parakeetFell"
-                        await MainActor.run { VoiceIndicator.shared.showToast(L10n.t(key)) }
-                    }
-                }
-                // Кодируем и шифруем ЗДЕСЬ, в фоне, а не в deliver: тот работает на главном потоке,
-                // где живёт runloop нашего event-tap, и подмораживать его ради AAC нельзя (цену этого
-                // мы уже платили на startRunning, см. AudioRecorder).
-                let clip = VoiceClips.save(samples: samples)
-                await MainActor.run {
-                    guard self.endTranscription(gen) else { clip.map { VoiceClips.delete($0.id) }; return }   // сторож уже бросил — поздний результат в топку
-                    self.deliver(text, historyOnly: self.historyOnlyGens.remove(gen) != nil, audio: clip?.id, wave: clip?.wave)
-                    self.refreshIndicator()
-                    // Выгрузка после диктовки, если человек её включил. Без настройки это ещё и
-                    // заводит таймер простоя для Whisper, если он понадобился как запасной движок:
-                    // раньше такой запасной Whisper оставался в памяти насовсем.
-                    self.scheduleModelRelease()
-                }
-            }
-            return
-        }
-        // whisper — строго по одному (serial queue): новая ЗАПИСЬ при этом не блокируется.
-        transcribeQueue.async { [weak self] in
+        let capturedTasks = pendingSegmentTasks
+        pendingSegmentTasks.removeAll()
+        var accumulated = sessionTextSegments
+        sessionTextSegments.removeAll()
+        let fullAudio = totalSamples
+        sessionAudioSamples.removeAll()
+
+        Task { [weak self] in
             guard let self else { return }
-            let modelReady = self.whisper != nil
-            let text = self.whisper?.transcribe(samples: samples, language: lang) ?? ""
-            kbLog("voice: whisper(модель=\(modelReady ? "ок" : "НЕТ"), \(lang)) → \(text.count) симв.")
-            let clip = VoiceClips.save(samples: samples)   // фон, не главный поток (см. ветку parakeet)
-            DispatchQueue.main.async {
-                guard self.endTranscription(gen) else { clip.map { VoiceClips.delete($0.id) }; return }   // сторож уже бросил — поздний результат в топку
-                self.deliver(text, historyOnly: self.historyOnlyGens.remove(gen) != nil, audio: clip?.id, wave: clip?.wave)
+            // Дожидаемся результатов фоновых сегментов
+            for task in capturedTasks {
+                let seg = await task.value
+                let trimmed = seg.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { accumulated.append(trimmed) }
+            }
+            // Транскрибируем финальный кусок (tail)
+            let tailRms = tailSamples.isEmpty ? 0 : (tailSamples.map { $0 * $0 }.reduce(0, +) / Float(tailSamples.count)).squareRoot()
+            if tailRms > 0.001 && tailSamples.count > 1600 {
+                let tailText = await self.transcribeSegmentSamples(tailSamples, lang: lang, useParakeet: useParakeet)
+                let trimmedTail = tailText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmedTail.isEmpty { accumulated.append(trimmedTail) }
+            }
+
+            // Склеиваем все куски единым полотном через пробел (ADR-012)
+            let fullText = accumulated.filter { !$0.isEmpty }.joined(separator: " ")
+            kbLog("voice: сегментная склейка Chunk-Batching (\(accumulated.count) кусков) → '\(fullText)'")
+
+            let clip = VoiceClips.save(samples: fullAudio)
+            await MainActor.run {
+                guard self.endTranscription(gen) else { clip.map { VoiceClips.delete($0.id) }; return }
+                self.deliver(fullText, historyOnly: self.historyOnlyGens.remove(gen) != nil, audio: clip?.id, wave: clip?.wave)
                 self.refreshIndicator()
-                self.scheduleModelRelease()   // простаиваем → вернём ~1.5 ГБ системе
+                self.scheduleModelRelease()
             }
         }
     }
@@ -523,11 +523,11 @@ final class VoiceController {
     /// текст, а через секунду в то же поле приехал бы свежий, и человек разбирал бы склейку.
     /// ⚠️ Только с главного потока: `liveTranscriptions` main-only.
     var isBusyWithDictation: Bool {
-        recorder.isRecording || liveTranscriptions.contains(where: { !historyOnlyGens.contains($0) })
+        recorder.isRecording || isSessionPaused || liveTranscriptions.contains(where: { !historyOnlyGens.contains($0) })
     }
 
     private func refreshIndicator() {
-        if recorder.isRecording { setState(.recording) }
+        if recorder.isRecording || isSessionPaused { setState(.recording) }
         else if liveTranscriptions.contains(where: { !historyOnlyGens.contains($0) }) { setState(.processing) }
         else { setState(.idle) }
     }
@@ -552,21 +552,21 @@ final class VoiceController {
 
     /// Отмена текущей диктовки (Escape) — запись отбрасываем, ничего не вставляем.
     func cancel() {
-        if starting && !recorder.isRecording {   // отмена во время async-старта — прерываем запуск
+        if starting && !recorder.isRecording && !isSessionPaused {   // отмена во время async-старта — прерываем запуск
             abortStart = true; VoiceGate.set(false)
             kbLog("voice: отмена во время старта — прерываю запуск")
             return
         }
-        guard recorder.isRecording else { VoiceGate.set(false); return }
+        guard isRecording else { VoiceGate.set(false); return }
         stopLiveDraft()
         VoiceIndicator.shared.setPaused(false)
+        isSessionPaused = false
+        pendingSegmentTasks.forEach { $0.cancel() }
+        pendingSegmentTasks.removeAll()
+        sessionTextSegments.removeAll()
+        sessionAudioSamples.removeAll()
         if streamingActive { streamCancel(); return }   // потоковый путь: стереть напечатанное
-        // ОТМЕНА С СОХРАНЕНИЕМ В ИСТОРИЮ (R37, выключено по умолчанию). Человек просил: «нажал
-        // Escape — пусть всё равно распознает и положит куда-нибудь». Идём ТЕМ ЖЕ путём, что и
-        // обычное завершение, чтобы не заводить второй конвейер транскрипции со своими проверками
-        // длительности, тишины и сторожем; отличие ровно одно и оно в самом конце — в поле ничего не
-        // вставляем. Поколение помечаем в множестве, а не флагом: пока эта расшифровка считается,
-        // человек уже может начать следующую диктовку, и перепутать их нельзя.
+        // ОТМЕНА С СОХРАНЕНИЕМ В ИСТОРИЮ (R37, выключено по умолчанию).
         if settings.escSaveToHistory {
             kbLog("voice: отмена (Escape) — распознаю и положу в историю, вставлять не буду")
             historyOnlyGens.insert(transcribeGen + 1)   // следующее поколение заведёт end()
@@ -577,7 +577,7 @@ final class VoiceController {
         VoiceGate.set(false)
         refreshIndicator()
         playCue(failSound)   // мягкий нисходящий «отменено»
-        kbLog("voice: диктовка отменена (Escape)")
+        kbLog("voice: диктовка отменена")
     }
 
     // MARK: - Живой черновик на плашке (Parakeet, скользящее окно)
@@ -721,7 +721,7 @@ final class VoiceController {
     }
 
     /// Текущее состояние записи (для кнопки в окне истории).
-    var isRecording: Bool { recorder.isRecording }
+    var isRecording: Bool { recorder.isRecording || isSessionPaused }
     /// Запись по кнопке (toggle): не активна → старт; активна → стоп. Опирается на isActive
     /// (синхронный), а не isRecording — иначе быстрый второй тап во время async-старта рассинхронит.
     func toggleRecording(override: Bool = false) {

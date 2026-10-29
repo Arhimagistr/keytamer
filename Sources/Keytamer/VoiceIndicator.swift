@@ -244,15 +244,20 @@ final class VoiceIndicator {
     }
 
     /// Отображение состояния паузы записи
+    private var isPausedIndicator: Bool = false
     func setPaused(_ paused: Bool) {
         DispatchQueue.main.async {
             guard self.mode == .recording, self.onScreen else { return }
+            self.isPausedIndicator = paused
             if paused {
+                self.ticker?.invalidate()
+                self.ticker = nil
                 self.label.stringValue = L10n.t("voice.paused")
                 self.wave.stop()
             } else {
                 self.label.stringValue = L10n.t("voice.listening")
                 self.wave.start(shimmer: false)
+                self.startTicker()
             }
             self.relayout(text: self.label.stringValue, showWave: true)
         }
@@ -615,6 +620,7 @@ final class VoiceIndicator {
         ticker?.invalidate()
         let t = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
             guard let self, self.mode == .recording, self.onScreen else { return }
+            guard !self.isPausedIndicator else { return }
             guard self.liveText.isEmpty else { return }        // справа сейчас речь, таймеру там места нет
             let s = self.elapsedString()
             guard s != self.label.stringValue else { return }  // секунда не сменилась — не трогаем окно
