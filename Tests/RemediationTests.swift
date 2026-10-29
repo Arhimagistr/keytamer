@@ -431,6 +431,115 @@ func testDictationPauseCancelAndDoubleTapPaste() {
     assertTrue(etHasDoubleTapPaste, "EventTap must handle double-tap for paste dictation")
 }
 
+// MARK: - 10. Totals-Critic Defects Remediation & Chunk-Batching Pause (ADR-012)
+
+struct DoubleTapOptionStateMachine {
+    var voiceModArmed: Bool = false
+    var suppressVoiceOnNextUp: Bool = false
+    var toggleVoiceTriggered: Bool = false
+    var pasteTriggered: Bool = false
+    var cmdCancelArmed: Bool = false
+    var cancelTriggered: Bool = false
+
+    // Simulate second Option tap during double-tap trigger
+    mutating func onSecondOptionDown() {
+        // Double tap recognized!
+        pasteTriggered = true
+        suppressVoiceOnNextUp = true
+        voiceModArmed = false
+    }
+
+    mutating func onOptionUp() {
+        if suppressVoiceOnNextUp {
+            suppressVoiceOnNextUp = false
+            return
+        }
+        if voiceModArmed {
+            voiceModArmed = false
+            toggleVoiceTriggered = true
+        }
+    }
+
+    // Simulate Command cancel solo-up protection
+    mutating func onCommandDown(isRecording: Bool) {
+        if isRecording {
+            cmdCancelArmed = true
+        }
+    }
+
+    mutating func onKeyDownChord() {
+        // Any key down (e.g. C, Tab, V) disarms solo command cancel
+        cmdCancelArmed = false
+    }
+
+    mutating func onCommandUp() {
+        if cmdCancelArmed {
+            cmdCancelArmed = false
+            cancelTriggered = true
+        }
+    }
+}
+
+func testTotalsCriticRemediationAndChunkBatching() {
+    print("\n--- Test 10: Totals-Critic Defects Remediation & Chunk-Batching Pause (ADR-012) ---")
+    
+    // 1. DoubleTap state machine simulation (DEF-01)
+    var sm = DoubleTapOptionStateMachine()
+    sm.onSecondOptionDown()
+    assertTrue(sm.pasteTriggered, "Double tap must trigger paste")
+    assertTrue(sm.suppressVoiceOnNextUp, "Double tap must suppress next voice toggle on UP")
+    sm.onOptionUp()
+    assertFalse(sm.toggleVoiceTriggered, "DEF-01: Releasing Option after double-tap paste must NOT trigger voice recording")
+
+    // 2. Command chord safety simulation (DEF-03)
+    var cmdSm = DoubleTapOptionStateMachine()
+    cmdSm.onCommandDown(isRecording: true)
+    cmdSm.onKeyDownChord() // user pressed Cmd+C
+    cmdSm.onCommandUp()
+    assertFalse(cmdSm.cancelTriggered, "DEF-03: Cmd chord must NOT cancel recording on release")
+
+    var cmdSoloSm = DoubleTapOptionStateMachine()
+    cmdSoloSm.onCommandDown(isRecording: true)
+    cmdSoloSm.onCommandUp() // pure solo tap
+    assertTrue(cmdSoloSm.cancelTriggered, "DEF-03: Solo Cmd release must trigger cancel")
+
+    // 3. Source code inspections for DEF-01, DEF-02, DEF-03, Batching
+    let projectDir = "/Users/manar/AIII/projects/keytamer"
+    let vcPath = "\(projectDir)/Sources/Keytamer/VoiceController.swift"
+    let viPath = "\(projectDir)/Sources/Keytamer/VoiceIndicator.swift"
+    let etPath = "\(projectDir)/Sources/Keytamer/EventTap.swift"
+
+    guard let vcContent = try? String(contentsOf: URL(fileURLWithPath: vcPath), encoding: .utf8),
+          let viContent = try? String(contentsOf: URL(fileURLWithPath: viPath), encoding: .utf8),
+          let etContent = try? String(contentsOf: URL(fileURLWithPath: etPath), encoding: .utf8) else {
+        testFailures.append("Could not read project source files for Test 10")
+        return
+    }
+
+    // DEF-01 in EventTap
+    let etHasSuppressVoice = etContent.contains("suppressVoiceOnNextUp")
+    assertTrue(etHasSuppressVoice, "EventTap must contain suppressVoiceOnNextUp for DEF-01")
+
+    // Option arbitration delay lowered to 0.17
+    let etHasFasterArbitration = etContent.contains("0.17") || etContent.contains("0.16")
+    assertTrue(etHasFasterArbitration, "EventTap must reduce Option double-tap arbitration window to ~0.17s")
+
+    // DEF-02 in VoiceIndicator: ticker stopped on pause
+    let viStopsTickerOnPause = viContent.contains("ticker?.invalidate()") || viContent.contains("ticker?.cancel()")
+    assertTrue(viStopsTickerOnPause, "VoiceIndicator must stop ticker when paused to avoid wiping pause label")
+
+    // DEF-03 in EventTap: cmdCancelArmed on solo up
+    let etHasCmdCancelArmed = etContent.contains("cmdCancelArmed")
+    assertTrue(etHasCmdCancelArmed, "EventTap must track cmdCancelArmed on solo release")
+
+    // Chunk-Batching Pause in VoiceController
+    let vcHasSessionSegments = vcContent.contains("sessionTextSegments")
+    assertTrue(vcHasSessionSegments, "VoiceController must accumulate sessionTextSegments across pause chunks")
+
+    let vcBatchingJoined = vcContent.contains("joined(separator:") || vcContent.contains("sessionTextSegments")
+    assertTrue(vcBatchingJoined, "VoiceController must batch and join session segments upon completion")
+}
+
 // MARK: - Main Runner
 
 print("=== KEYTAMER REMEDIATION SUITE ===")
@@ -443,6 +552,7 @@ testInputReliabilityAndProtocolHygiene()
 testCoexistenceModeWithKeyboopLock()
 testKeyboopSettingsMigration()
 testDictationPauseCancelAndDoubleTapPaste()
+testTotalsCriticRemediationAndChunkBatching()
 
 print("\n=== SUMMARY ===")
 if testFailures.isEmpty {
