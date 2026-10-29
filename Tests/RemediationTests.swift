@@ -540,6 +540,52 @@ func testTotalsCriticRemediationAndChunkBatching() {
     assertTrue(vcBatchingJoined, "VoiceController must batch and join session segments upon completion")
 }
 
+// MARK: - 11. Universal Triggers & Zero-Loss Cancel Segments (ADR-013)
+
+func testUniversalTriggersAndZeroLossCancel() {
+    print("\n--- Test 11: Universal Triggers & Zero-Loss Cancel Segments (ADR-013) ---")
+
+    let projectDir = "/Users/manar/AIII/projects/keytamer"
+    let vcPath = "\(projectDir)/Sources/Keytamer/VoiceController.swift"
+    let etPath = "\(projectDir)/Sources/Keytamer/EventTap.swift"
+    let asPath = "\(projectDir)/Sources/Keytamer/AppSettings.swift"
+    let swPath = "\(projectDir)/Sources/Keytamer/SettingsWindow.swift"
+
+    guard let vcContent = try? String(contentsOf: URL(fileURLWithPath: vcPath), encoding: .utf8),
+          let etContent = try? String(contentsOf: URL(fileURLWithPath: etPath), encoding: .utf8),
+          let asContent = try? String(contentsOf: URL(fileURLWithPath: asPath), encoding: .utf8),
+          let swContent = try? String(contentsOf: URL(fileURLWithPath: swPath), encoding: .utf8) else {
+        testFailures.append("Could not read project source files for Test 11")
+        return
+    }
+
+    // 1. Zero-Loss Cancel in VoiceController: cancel() must NOT wipe sessionTextSegments before saving
+    let vcCancelPreservesSegments = vcContent.contains("func cancel()") && !vcContent.contains("sessionTextSegments.removeAll()\n        if streamingActive")
+    assertTrue(vcCancelPreservesSegments, "VoiceController.cancel() must preserve segments for history delivery")
+
+    // 2. AppSettings: voicePauseModifiers and custom label
+    let asHasPauseMods = asContent.contains("voicePauseModifiers")
+    assertTrue(asHasPauseMods, "AppSettings must define voicePauseModifiers")
+
+    let asHasPauseLabel = asContent.contains("voicePauseKeyLabel")
+    assertTrue(asHasPauseLabel, "AppSettings must define voicePauseKeyLabel")
+
+    let asHasUniversalTriggers = asContent.contains("voicePauseTrigger") && asContent.contains("voiceCancelTrigger")
+    assertTrue(asHasUniversalTriggers, "AppSettings must define voicePauseTrigger and voiceCancelTrigger")
+
+    // 3. EventTap: check voicePause modifiers match
+    let etChecksPauseMods = etContent.contains("voicePauseModifiers")
+    assertTrue(etChecksPauseMods, "EventTap must match voicePauseModifiers against event flags")
+
+    // 4. EventTap: Multi-tap detector (2x / 3x)
+    let etHasMultiTap = etContent.contains("MultiTap") || etContent.contains("tripletap") || etContent.contains("tapCount")
+    assertTrue(etHasMultiTap, "EventTap must support multi-tap triggers (doubletap and tripletap)")
+
+    // 5. SettingsWindow: voice pause presets and recording
+    let swHasPausePresets = swContent.contains("voicePausePresets") || swContent.contains("startVoicePauseHotkeyRecording")
+    assertTrue(swHasPausePresets, "SettingsWindow must provide voice pause presets and custom hotkey recording")
+}
+
 // MARK: - Main Runner
 
 print("=== KEYTAMER REMEDIATION SUITE ===")
@@ -553,6 +599,7 @@ testCoexistenceModeWithKeyboopLock()
 testKeyboopSettingsMigration()
 testDictationPauseCancelAndDoubleTapPaste()
 testTotalsCriticRemediationAndChunkBatching()
+testUniversalTriggersAndZeroLossCancel()
 
 print("\n=== SUMMARY ===")
 if testFailures.isEmpty {
