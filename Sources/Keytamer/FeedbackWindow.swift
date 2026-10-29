@@ -485,8 +485,11 @@ final class FeedbackWindowController: NSWindowController, NSWindowDelegate, NSTe
         case .caseChange:
             c = ("caseChange", s.caseChangeEnabled, "key", s.caseChangeKeyCode, s.caseChangeModifiers, "")
         case .pasteDictation:
-            c = ("pasteDictation", s.pasteDictationEnabled, "key", s.pasteDictationKeyCode,
+            c = ("pasteDictation", s.pasteDictationEnabled, s.pasteDictationTrigger, s.pasteDictationKeyCode,
                  s.pasteDictationModifiers, "")
+        case .voicePause:
+            c = ("voicePause", s.voicePauseEnabled, s.voicePauseTrigger, s.voicePauseKeyCode,
+                 s.voicePauseModifiers, "")
         }
         let combo = "\(c.mode)/\(c.keyCode)/\(c.mods)"
         return "\(c.key)=" + (c.on ? combo : "выкл(\(combo))") + c.tail

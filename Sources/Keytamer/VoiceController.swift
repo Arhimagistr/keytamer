@@ -550,7 +550,7 @@ final class VoiceController {
         sound.play()
     }
 
-    /// Отмена текущей диктовки (Escape) — запись отбрасываем, ничего не вставляем.
+    /// Отмена текущей диктовки — в поле не пишем, но надиктованное склеиваем и сохраняем в историю целиком (ADR-013)
     func cancel() {
         if starting && !recorder.isRecording && !isSessionPaused {   // отмена во время async-старта — прерываем запуск
             abortStart = true; VoiceGate.set(false)
@@ -560,24 +560,15 @@ final class VoiceController {
         guard isRecording else { VoiceGate.set(false); return }
         stopLiveDraft()
         VoiceIndicator.shared.setPaused(false)
-        isSessionPaused = false
-        pendingSegmentTasks.forEach { $0.cancel() }
-        pendingSegmentTasks.removeAll()
-        sessionTextSegments.removeAll()
-        sessionAudioSamples.removeAll()
         if streamingActive { streamCancel(); return }   // потоковый путь: стереть напечатанное
-        // ОТМЕНА С СОХРАНЕНИЕМ В ИСТОРИЮ (R37, выключено по умолчанию).
-        if settings.escSaveToHistory {
-            kbLog("voice: отмена (Escape) — распознаю и положу в историю, вставлять не буду")
-            historyOnlyGens.insert(transcribeGen + 1)   // следующее поколение заведёт end()
-            end()
-            return
-        }
-        _ = recorder.stop()
-        VoiceGate.set(false)
-        refreshIndicator()
-        playCue(failSound)   // мягкий нисходящий «отменено»
-        kbLog("voice: диктовка отменена")
+
+        // Zero-Loss сохранение всех сегментов в историю (ADR-013):
+        // При отмене диктовки в активное поле текст не идёт, но все надиктованные кусочки
+        // обязаны склеиться воедино и сохраниться в VoiceHistory (historyOnly = true),
+        // чтобы последующая вставка отдавала 100% полный текст всей сессии.
+        kbLog("voice: отмена диктовки — сохраняю все накопленные сегменты в историю (historyOnly=true)")
+        historyOnlyGens.insert(transcribeGen + 1)
+        end()
     }
 
     // MARK: - Живой черновик на плашке (Parakeet, скользящее окно)

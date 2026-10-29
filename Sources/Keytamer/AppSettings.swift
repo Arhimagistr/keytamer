@@ -268,20 +268,51 @@ final class AppSettings {
     /// Звук старта/стопа записи (отдельно от звука конвертации). По умолчанию включён.
     var voiceSoundEnabled: Bool { get { d.bool(forKey: "voiceSoundEnabled") } set { d.set(newValue, forKey: "voiceSoundEnabled") } }
 
-    /// Отмена записи по одиночному клику Command (ADR-011)
+    /// Отмена записи (ADR-011 / ADR-013)
+    var voiceCancelTrigger: String {
+        get { d.string(forKey: "voiceCancelTrigger") ?? "key" }
+        set { d.set(newValue, forKey: "voiceCancelTrigger") }
+    }
+    var voiceCancelKeyCode: Int {
+        get { d.object(forKey: "voiceCancelKeyCode") == nil ? 53 : d.integer(forKey: "voiceCancelKeyCode") }
+        set { d.set(newValue, forKey: "voiceCancelKeyCode") }
+    }
+    var voiceCancelModifiers: UInt64 {
+        get { UInt64(bitPattern: Int64(d.integer(forKey: "voiceCancelMods"))) }
+        set { d.set(Int(bitPattern: UInt(newValue)), forKey: "voiceCancelMods") }
+    }
+    var voiceCancelKeyLabel: String {
+        get { d.string(forKey: "voiceCancelKeyLabel") ?? "Escape" }
+        set { d.set(newValue, forKey: "voiceCancelKeyLabel") }
+    }
     var voiceCancelByCommand: Bool {
         get { d.object(forKey: "voiceCancelByCommand") == nil ? true : d.bool(forKey: "voiceCancelByCommand") }
         set { d.set(newValue, forKey: "voiceCancelByCommand") }
     }
 
-    /// Пауза/продолжение записи по пробелу (ADR-011)
+    /// Пауза/продолжение записи по комбинации (ADR-011 / ADR-013)
     var voicePauseEnabled: Bool {
         get { d.object(forKey: "voicePauseEnabled") == nil ? true : d.bool(forKey: "voicePauseEnabled") }
         set { d.set(newValue, forKey: "voicePauseEnabled") }
     }
+    var voicePauseTrigger: String {
+        get { d.string(forKey: "voicePauseTrigger") ?? "key" }
+        set { d.set(newValue, forKey: "voicePauseTrigger") }
+    }
     var voicePauseKeyCode: Int {
         get { d.object(forKey: "voicePauseKeyCode") == nil ? 49 : d.integer(forKey: "voicePauseKeyCode") }
         set { d.set(newValue, forKey: "voicePauseKeyCode") }
+    }
+    var voicePauseModifiers: UInt64 {
+        get {
+            let v = d.object(forKey: "voicePauseMods") as? Int
+            return UInt64(bitPattern: Int64(v ?? Int(CGEventFlags.maskAlternate.rawValue)))
+        }
+        set { d.set(Int(bitPattern: UInt(newValue)), forKey: "voicePauseMods") }
+    }
+    var voicePauseKeyLabel: String {
+        get { d.string(forKey: "voicePauseKeyLabel") ?? "⌥Пробел" }
+        set { d.set(newValue, forKey: "voicePauseKeyLabel") }
     }
 
     /// Опции ВЫВОДА диктовки (просили несколько человек, задача #41). Обе выключены по умолчанию:
@@ -673,9 +704,9 @@ final class AppSettings {
         get { d.string(forKey: "pasteDictationKeyLabel") ?? "" }
         set { d.set(newValue, forKey: "pasteDictationKeyLabel") }
     }
-    var pasteDictationEnabled: Bool { pasteDictationKeyCode >= 0 || pasteDictationDoubleTap }
+    var pasteDictationEnabled: Bool { pasteDictationKeyCode >= 0 || pasteDictationDoubleTap || pasteDictationTrigger == "tripletap" }
 
-    /// Режим вставки последней диктовки: "hotkey" или "doubletap" (по умолчанию 2× Option) (ADR-011)
+    /// Режим вставки последней диктовки: "hotkey", "doubletap" (2×) или "tripletap" (3×) (ADR-011 / ADR-013)
     var pasteDictationTrigger: String {
         get { d.string(forKey: "pasteDictationTrigger") ?? "doubletap" }
         set { d.set(newValue, forKey: "pasteDictationTrigger") }
@@ -683,6 +714,10 @@ final class AppSettings {
     var pasteDictationDoubleTap: Bool {
         get { pasteDictationTrigger == "doubletap" }
         set { pasteDictationTrigger = newValue ? "doubletap" : "hotkey" }
+    }
+    var pasteDictationTripleTap: Bool {
+        get { pasteDictationTrigger == "tripletap" }
+        set { if newValue { pasteDictationTrigger = "tripletap" } }
     }
     var pasteDictationDoubleTapModifier: UInt64 {
         get {

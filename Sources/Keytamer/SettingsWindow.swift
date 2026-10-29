@@ -3832,6 +3832,8 @@ final class DetailVC: NSViewController {
             hairline(),
             subordinateRow(switchRow(L10n.t("voice.pauseEnabled"), L10n.t("voice.pauseEnabledSub"), settings.voicePauseEnabled, #selector(toggleVoicePause),
                                      help: L10n.t("voice.pauseEnabledHelp"), key: "voice.pauseEnabled")),
+            subordinateRow(controlRow(L10n.t("voice.pauseCombo"), makeVoicePausePopup(),
+                                      help: L10n.t("voice.pauseComboSub"), key: "voice.pauseCombo")),
             hairline(),
             subordinateRow(switchRow(L10n.t("voice.cancelByCommand"), L10n.t("voice.cancelByCommandSub"), settings.voiceCancelByCommand, #selector(toggleVoiceCancelByCommand),
                                      help: L10n.t("voice.cancelByCommandHelp"), key: "voice.cancelByCommand")),
@@ -4200,18 +4202,82 @@ final class DetailVC: NSViewController {
         autoEnterBox?.setVisible(on, in: contentStack)
     }
     @objc private func toggleVoiceTrailSpace(_ s: NSSwitch) { settings.voiceTrailingSpace = (s.state == .on) }
-    @objc private func toggleVoicePause(_ s: NSSwitch) { settings.voicePauseEnabled = (s.state == .on) }
+    @objc private func toggleVoicePause(_ s: NSSwitch) {
+        settings.voicePauseEnabled = (s.state == .on)
+        reshow()
+    }
     @objc private func toggleVoiceCancelByCommand(_ s: NSSwitch) { settings.voiceCancelByCommand = (s.state == .on) }
+
+    static let voicePausePresets: [(String, String, Int, UInt64)] = [
+        ("⌥Пробел", "key", 49, CGEventFlags.maskAlternate.rawValue),
+        ("Пробел", "key", 49, 0),
+        ("⌃Пробел", "key", 49, CGEventFlags.maskControl.rawValue),
+        ("⇧Пробел", "key", 49, CGEventFlags.maskShift.rawValue),
+        ("2× Пробел", "doubletap", 49, 0),
+        ("3× Пробел", "tripletap", 49, 0),
+    ]
+
+    private func makeVoicePausePopup() -> NSView {
+        let pop = NSPopUpButton(frame: .zero, pullsDown: false)
+        var titles = Self.voicePausePresets.map { $0.0 }
+        var sel = Self.voicePausePresets.firstIndex {
+            $0.1 == settings.voicePauseTrigger && $0.2 == settings.voicePauseKeyCode && $0.3 == settings.voicePauseModifiers
+        }
+        if sel == nil, !settings.voicePauseKeyLabel.isEmpty {
+            titles.append(settings.voicePauseKeyLabel)
+            sel = titles.count - 1
+        }
+        pop.addItems(withTitles: titles + [L10n.t("snip.pickCustom")])
+        pop.selectItem(at: sel ?? 0)
+        pop.target = self; pop.action = #selector(voicePausePresetChanged(_:))
+        return pop
+    }
+
+    @objc private func voicePausePresetChanged(_ p: NSPopUpButton) {
+        let i = p.indexOfSelectedItem
+        if i == p.numberOfItems - 1 {
+            startVoicePauseHotkeyRecording()
+            return
+        }
+        guard i >= 0, i < Self.voicePausePresets.count else { return }
+        let preset = Self.voicePausePresets[i]
+        settings.voicePauseKeyLabel = preset.0
+        settings.voicePauseTrigger = preset.1
+        settings.voicePauseKeyCode = preset.2
+        settings.voicePauseModifiers = preset.3
+    }
+
+    private func startVoicePauseHotkeyRecording() {
+        startHotkeyRecording(what: L10n.t("hkrec.what.voicePause"), slot: .voicePause) { [weak self] code, mods, label in
+            self?.settings.voicePauseKeyCode = code
+            self?.settings.voicePauseModifiers = mods.rawValue
+            self?.settings.voicePauseKeyLabel = label
+            self?.settings.voicePauseTrigger = "key"
+            self?.reshow()
+        }
+    }
 
     private func makePasteDictationTriggerPopup() -> NSView {
         let pop = NSPopUpButton(frame: .zero, pullsDown: false)
-        pop.addItems(withTitles: [L10n.t("voice.pasteDoubleOpt"), L10n.t("voice.pasteHotkey")])
-        pop.selectItem(at: settings.pasteDictationDoubleTap ? 0 : 1)
+        pop.addItems(withTitles: [
+            L10n.t("voice.pasteDoubleOpt"),
+            L10n.t("voice.pasteTripleOpt"),
+            L10n.t("voice.pasteHotkey")
+        ])
+        let selIdx: Int
+        if settings.pasteDictationTrigger == "tripletap" { selIdx = 1 }
+        else if settings.pasteDictationTrigger == "doubletap" { selIdx = 0 }
+        else { selIdx = 2 }
+        pop.selectItem(at: selIdx)
         pop.target = self; pop.action = #selector(pasteDictationTriggerChanged(_:))
         return pop
     }
     @objc private func pasteDictationTriggerChanged(_ p: NSPopUpButton) {
-        settings.pasteDictationDoubleTap = (p.indexOfSelectedItem == 0)
+        switch p.indexOfSelectedItem {
+        case 0: settings.pasteDictationTrigger = "doubletap"
+        case 1: settings.pasteDictationTrigger = "tripletap"
+        default: settings.pasteDictationTrigger = "hotkey"
+        }
     }
 
     private weak var clipboardThresholdBox: CollapsibleRow?

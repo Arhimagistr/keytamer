@@ -143,7 +143,10 @@ final class EventTap {
     /// Один раз предупредили про сохранённую голую клавишу мгновенного переключения (не спамим лог).
     private var warnedBareInstantSwitch = false
     private var lastPasteDictationTap: CFTimeInterval = 0
+    private var pasteDictationTapCount: Int = 0
     private var otherKeyDuringPasteTap = false
+    private var lastVoicePauseTap: CFTimeInterval = 0
+    private var voicePauseTapCount: Int = 0
     private var suppressVoiceOnNextUp = false
     private var cmdCancelArmed = false
     private var pendingVoiceWorkItem: DispatchWorkItem?
@@ -557,16 +560,43 @@ final class EventTap {
                 kbLog("voice: Escape с модификатором — считаю промахом мимо хоткея, диктовку НЕ отменяю")
                 return Unmanaged.passUnretained(event)   // отдаём системе: вдруг это чей-то аккорд
             }
-            if keyCode == 53, s.escCancelsDictation, VoiceController.shared.isRecording {
-                onMain { VoiceController.shared.cancel() }
-                if s.voiceHoldMode == "toggle" { voiceKeyArmed = false } else { voiceActive = false }
-                return swallowDown(keyCode)
-            }
-            // Пауза/продолжение записи по пробелу (ADR-011)
-            if s.voicePauseEnabled, keyCode == Int64(s.voicePauseKeyCode), VoiceController.shared.isRecording {
-                if event.flags.intersection([.maskCommand, .maskControl, .maskAlternate]).isEmpty {
-                    onMain { VoiceController.shared.togglePause() }
+            // Отмена диктовки (ADR-011 / ADR-013)
+            if VoiceController.shared.isRecording {
+                let wantCancelMods = relevantMods(CGEventFlags(rawValue: s.voiceCancelModifiers))
+                let currentMods = relevantMods(event.flags)
+                let isCancelKey = (keyCode == Int64(s.voiceCancelKeyCode) || keyMatches(keyCode, s.voiceCancelKeyCode))
+                let isDefaultEsc = (keyCode == 53 && s.escCancelsDictation && currentMods.isEmpty)
+                if isDefaultEsc || (isCancelKey && currentMods == wantCancelMods) {
+                    onMain { VoiceController.shared.cancel() }
+                    if s.voiceHoldMode == "toggle" { voiceKeyArmed = false } else { voiceActive = false }
                     return swallowDown(keyCode)
+                }
+            }
+            // Пауза/продолжение записи по комбинации или мульти-тапу (ADR-011 / ADR-013)
+            if s.voicePauseEnabled, VoiceController.shared.isRecording {
+                let wantMods = relevantMods(CGEventFlags(rawValue: s.voicePauseModifiers))
+                let currentMods = relevantMods(event.flags)
+                let isPauseKey = (keyCode == Int64(s.voicePauseKeyCode) || keyMatches(keyCode, s.voicePauseKeyCode))
+                if isPauseKey && currentMods == wantMods {
+                    if s.voicePauseTrigger == "doubletap" || s.voicePauseTrigger == "tripletap" {
+                        let target = (s.voicePauseTrigger == "tripletap") ? 3 : 2
+                        let now = CACurrentMediaTime()
+                        if now - lastVoicePauseTap < 0.28 {
+                            voicePauseTapCount += 1
+                        } else {
+                            voicePauseTapCount = 1
+                        }
+                        lastVoicePauseTap = now
+                        if voicePauseTapCount >= target {
+                            voicePauseTapCount = 0
+                            lastVoicePauseTap = 0
+                            onMain { VoiceController.shared.togglePause() }
+                            return swallowDown(keyCode)
+                        }
+                    } else {
+                        onMain { VoiceController.shared.togglePause() }
+                        return swallowDown(keyCode)
+                    }
                 }
             }
             // Мгновенное переключение языка комбинацией (⌘Space/⌃Space/своя): ГЛОТАЕМ, чтобы не
@@ -1004,25 +1034,31 @@ final class EventTap {
             }
         }
 
-        // Двойное нажатие Option для вставки последней диктовки (ADR-011 / DEF-01)
-        if s.pasteDictationDoubleTap {
-            let optMask = CGEventFlags.maskAlternate
+        // Мульти-нажатие Option (doubletap 2× или tripletap 3×) для вставки последней диктовки (ADR-011 / ADR-013)
+        if s.pasteDictationTrigger == "doubletap" || s.pasteDictationTrigger == "tripletap" {
+            let targetCount = (s.pasteDictationTrigger == "tripletap") ? 3 : 2
+            let optMask = CGEventFlags(rawValue: s.pasteDictationDoubleTapModifier)
             let isOptKey = (keyCode == 58 || keyCode == 61) || keyCodeMatchesMask(keyCode, optMask)
             let down = !flags.intersection(optMask).isEmpty
             let solo = relevantMods(flags).subtracting(relevantMods(optMask)).isEmpty
             if isOptKey && down && solo && !VoiceController.shared.isRecording {
                 let now = CACurrentMediaTime()
                 if now - lastPasteDictationTap < 0.28 && !otherKeyDuringPasteTap {
+                    pasteDictationTapCount += 1
+                } else {
+                    pasteDictationTapCount = 1
+                }
+                lastPasteDictationTap = now
+                otherKeyDuringPasteTap = false
+                if pasteDictationTapCount >= targetCount {
+                    pasteDictationTapCount = 0
                     lastPasteDictationTap = 0
                     pendingVoiceWorkItem?.cancel()
                     pendingVoiceWorkItem = nil
                     suppressVoiceOnNextUp = true
                     voiceModArmed = false
                     onMain { [weak self] in self?.handler?.handlePasteDictationHotkey() }
-                } else {
-                    lastPasteDictationTap = now
                 }
-                otherKeyDuringPasteTap = false
             }
         }
 

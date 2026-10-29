@@ -311,7 +311,7 @@ enum HotkeyGuard {
     ///
     /// Добавляя СЛЕДУЮЩИЙ хоткей, добавь его сюда же. Это единственное место, где перечислены все.
     enum Slot: CaseIterable {
-        case convert, voice, translate, instant, snippet, plainPaste, caseChange, pasteDictation
+        case convert, voice, translate, instant, snippet, plainPaste, caseChange, pasteDictation, voicePause
 
         /// Как назвать функцию человеку в тексте «занято: %@».
         var name: String {
@@ -324,20 +324,15 @@ enum HotkeyGuard {
             case .plainPaste: return L10n.t("is.busy.paste")
             case .caseChange: return L10n.t("is.busy.case")
             case .pasteDictation: return L10n.t("is.busy.pasteLast")
+            case .voicePause: return L10n.t("voice.paused")
             }
         }
 
         /// Раздел настроек, где эту комбинацию меняют.
-        ///
-        /// ⚠️ Появился 07.09.2026 вместе с восьмым слотом. До него плашка «Одна клавиша на два
-        /// действия» открывала ВСЕГДА раздел переключения (`AppDelegate.warnHotkeyClashOnce`), и это
-        /// было верно ровно для двух слотов из семи: сниппеты, вставку без форматирования и смену
-        /// регистра настраивают в «Автозамене», диктовку и вставку последней диктовки — в «Голосе».
-        /// То есть человек по кнопке из предупреждения попадал не туда, где чинить.
         var settingsSection: SettingsSection {
             switch self {
             case .convert, .instant:                  return .switching
-            case .voice, .pasteDictation:             return .voice
+            case .voice, .pasteDictation, .voicePause: return .voice
             case .translate:                          return .translate
             case .snippet, .plainPaste, .caseChange:  return .snippets
             }
@@ -370,7 +365,10 @@ enum HotkeyGuard {
                 return ("key", s.caseChangeKeyCode, s.caseChangeModifiers)
             case .pasteDictation:
                 guard s.pasteDictationEnabled else { return nil }
-                return ("key", s.pasteDictationKeyCode, s.pasteDictationModifiers)
+                return (s.pasteDictationTrigger, s.pasteDictationKeyCode, s.pasteDictationModifiers)
+            case .voicePause:
+                guard s.voicePauseEnabled else { return nil }
+                return (s.voicePauseTrigger, s.voicePauseKeyCode, s.voicePauseModifiers)
             }
         }
     }

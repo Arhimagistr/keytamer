@@ -48,14 +48,14 @@
   - [x] Перевод отмены записи по Command на Solo Tap UP с защитой от аккордов (DEF-03 P2)
   - [x] Закалка автомата состояний и тестов в RemediationTests.swift (DEF-04 P2, Test 10)
   - [x] Получение финального допуска ACCEPTED FOR PRODUCTION
-- [ ] **Phase 10: Универсальные триггеры команд (Single/Combo/Double/Triple) и Zero-Loss сохранение сегментов при отмене (ADR-013)**
-  - [ ] Zero-Loss отмена: сохранение и склейка всех сегментов при `cancel()`, гарантируя полный текст в `VoiceHistory` для последующей вставки
-  - [ ] Универсальный детектор мульти-тапов (`MultiTapDetector`: 1×, 2×, 3×) в `EventTap.swift`
-  - [ ] Настраиваемый триггер паузы с дефолтом `⌥Пробел` (`Option + Space`)
-  - [ ] Настраиваемый триггер отмены (Esc / solo Command / 2× / 3×)
-  - [ ] Настраиваемый триггер вставки (2× Option / 3× / Hotkey)
-  - [ ] Интерфейс настроек режимов и запись хоткеев в `SettingsWindow.swift`
-  - [ ] Регрессионные тесты Test 11 в `RemediationTests.swift` (TDD [RED] -> [GREEN])
+- [x] **Phase 10: Универсальные триггеры команд (Single/Combo/Double/Triple) и Zero-Loss сохранение сегментов при отмене (ADR-013)**
+  - [x] Zero-Loss отмена: сохранение и склейка всех сегментов при `cancel()`, гарантируя полный текст в `VoiceHistory` для последующей вставки
+  - [x] Универсальный детектор мульти-тапов (`MultiTapDetector`: 1×, 2×, 3×) в `EventTap.swift`
+  - [x] Настраиваемый триггер паузы с дефолтом `⌥Пробел` (`Option + Space`)
+  - [x] Настраиваемый триггер отмены (Esc / solo Command / 2× / 3×)
+  - [x] Настраиваемый триггер вставки (2× Option / 3× / Hotkey)
+  - [x] Интерфейс настроек режимов и запись хоткеев в `SettingsWindow.swift`
+  - [x] Регрессионные тесты Test 11 в `RemediationTests.swift` (TDD [RED] -> [GREEN])
 
 ## Active Tasks
 - [x] Инициализация когнитивной памяти проекта (MIND v6.3).
