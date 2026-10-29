@@ -142,6 +142,9 @@ final class EventTap {
     private var fnArmed = false
     /// Один раз предупредили про сохранённую голую клавишу мгновенного переключения (не спамим лог).
     private var warnedBareInstantSwitch = false
+    private var lastPasteDictationTap: CFTimeInterval = 0
+    private var otherKeyDuringPasteTap = false
+    private var pendingVoiceWorkItem: DispatchWorkItem?
 
     /// ПАРНОСТЬ ГЛОТАНИЙ. keyCode'ы, у которых мы проглотили keyDown → обязаны проглотить и keyUp.
     ///
@@ -524,6 +527,8 @@ final class EventTap {
             if comboArmed { otherKeyDuringCombo = true }
             modkeyArmed = false
             otherKeyBetweenTaps = true
+            otherKeyDuringPasteTap = true
+            pendingVoiceWorkItem?.cancel(); pendingVoiceWorkItem = nil
             fnArmed = false   // Fn+клавиша = комбинация (F1/стрелки/яркость), а не тап по 🌐
             voiceModArmed = false   // обычная клавиша при зажатом модификаторе — это аккорд, не тап
             // ЗАПИСЬ КОМБИНАЦИИ В НАСТРОЙКАХ: пропускаем нажатие насквозь, не перехватывая свои
@@ -553,6 +558,13 @@ final class EventTap {
                 onMain { VoiceController.shared.cancel() }
                 if s.voiceHoldMode == "toggle" { voiceKeyArmed = false } else { voiceActive = false }
                 return swallowDown(keyCode)
+            }
+            // Пауза/продолжение записи по пробелу (ADR-011)
+            if s.voicePauseEnabled, keyCode == Int64(s.voicePauseKeyCode), VoiceController.shared.isRecording {
+                if event.flags.intersection([.maskCommand, .maskControl, .maskAlternate]).isEmpty {
+                    onMain { VoiceController.shared.togglePause() }
+                    return swallowDown(keyCode)
+                }
             }
             // Мгновенное переключение языка комбинацией (⌘Space/⌃Space/своя): ГЛОТАЕМ, чтобы не
             // сработало то, что висит на ней в системе (Spotlight и пр.) — иначе всплывут оба.
@@ -969,6 +981,41 @@ final class EventTap {
         // Это тот же класс, что репорт #17 для одиночного модификатора, только в ветке 🌐, где мы
         // сочли проверку ненужной: у Fn отдельный флаг, но соседей по нему это не отменяет.
         else if !relevantMods(flags).isEmpty { fnArmed = false }
+
+        // Отмена активной записи диктовки по одиночному клику Command (ADR-011)
+        if s.voiceCancelByCommand, VoiceController.shared.isRecording {
+            let isCmdKey = (keyCode == 54 || keyCode == 55)
+            let hasCmd = !flags.intersection(.maskCommand).isEmpty
+            let soloCmd = relevantMods(flags).subtracting([.maskCommand]).isEmpty
+            if isCmdKey && hasCmd && soloCmd {
+                voiceModArmed = false
+                voiceActive = false
+                VoiceGate.set(false)
+                onMain { VoiceController.shared.cancel() }
+                return true
+            }
+        }
+
+        // Двойное нажатие Option для вставки последней диктовки (ADR-011)
+        if s.pasteDictationDoubleTap {
+            let optMask = CGEventFlags.maskAlternate
+            let isOptKey = (keyCode == 58 || keyCode == 61) || keyCodeMatchesMask(keyCode, optMask)
+            let down = !flags.intersection(optMask).isEmpty
+            let solo = relevantMods(flags).subtracting(relevantMods(optMask)).isEmpty
+            if isOptKey && down && solo && !VoiceController.shared.isRecording {
+                let now = CACurrentMediaTime()
+                if now - lastPasteDictationTap < 0.28 && !otherKeyDuringPasteTap {
+                    lastPasteDictationTap = 0
+                    pendingVoiceWorkItem?.cancel()
+                    pendingVoiceWorkItem = nil
+                    onMain { [weak self] in self?.handler?.handlePasteDictationHotkey() }
+                } else {
+                    lastPasteDictationTap = now
+                }
+                otherKeyDuringPasteTap = false
+            }
+        }
+
         // ⚠️ ВЗВОД ДИКТОВКИ СНИМАЕМ ЗДЕСЬ, ДО ВЕТКИ НИЖЕ, И ЭТО НЕ ПРИДИРКА К МЕСТУ.
         // Событие о ВТОРОМ модификаторе приходит с ЕГО собственным keyCode, а ветка диктовки
         // гейтится по НАШЕЙ клавише, то есть добавление ⇧ к зажатому ⌥ проходит мимо неё целиком.
@@ -1012,7 +1059,17 @@ final class EventTap {
                     voiceModArmedOverride = overrideVoiceTap
                 } else if voiceModArmed {
                     voiceModArmed = false
-                    toggleVoice(override: voiceModArmedOverride)
+                    let isOver = voiceModArmedOverride
+                    if s.pasteDictationDoubleTap && !VoiceGate.isActive {
+                        pendingVoiceWorkItem?.cancel()
+                        let work = DispatchWorkItem { [weak self] in
+                            self?.toggleVoice(override: isOver)
+                        }
+                        pendingVoiceWorkItem = work
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
+                    } else {
+                        toggleVoice(override: isOver)
+                    }
                 }
             } else {
                 if down && !voiceActive && (soloVoiceTap || overrideVoiceTap) {

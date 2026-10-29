@@ -3830,6 +3830,15 @@ final class DetailVC: NSViewController {
             subordinateRow(switchRow(L10n.t("voice.trailSpace"), L10n.t("voice.trailSpaceSub"), settings.voiceTrailingSpace, #selector(toggleVoiceTrailSpace),
                                      help: L10n.t("voice.trailSpaceHelp"), key: "voice.trailSpace")),
             hairline(),
+            subordinateRow(switchRow(L10n.t("voice.pauseEnabled"), L10n.t("voice.pauseEnabledSub"), settings.voicePauseEnabled, #selector(toggleVoicePause),
+                                     help: L10n.t("voice.pauseEnabledHelp"), key: "voice.pauseEnabled")),
+            hairline(),
+            subordinateRow(switchRow(L10n.t("voice.cancelByCommand"), L10n.t("voice.cancelByCommandSub"), settings.voiceCancelByCommand, #selector(toggleVoiceCancelByCommand),
+                                     help: L10n.t("voice.cancelByCommandHelp"), key: "voice.cancelByCommand")),
+            hairline(),
+            subordinateRow(controlRow(L10n.t("voice.pasteTrigger"), makePasteDictationTriggerPopup(),
+                                      help: L10n.t("voice.pasteTriggerSub"), key: "voice.pasteTrigger")),
+            hairline(),
             subordinateRow(switchRow(L10n.t("voice.clipboardPaste"), L10n.t("voice.clipboardPasteSub"), settings.voiceClipboardPaste, #selector(toggleVoiceClipboardPaste),
                                      help: L10n.t("voice.clipboardPasteHelp"), key: "voice.clipboardPaste")),
             makeClipboardThresholdBox(),
@@ -4191,6 +4200,19 @@ final class DetailVC: NSViewController {
         autoEnterBox?.setVisible(on, in: contentStack)
     }
     @objc private func toggleVoiceTrailSpace(_ s: NSSwitch) { settings.voiceTrailingSpace = (s.state == .on) }
+    @objc private func toggleVoicePause(_ s: NSSwitch) { settings.voicePauseEnabled = (s.state == .on) }
+    @objc private func toggleVoiceCancelByCommand(_ s: NSSwitch) { settings.voiceCancelByCommand = (s.state == .on) }
+
+    private func makePasteDictationTriggerPopup() -> NSView {
+        let pop = NSPopUpButton(frame: .zero, pullsDown: false)
+        pop.addItems(withTitles: [L10n.t("voice.pasteDoubleOpt"), L10n.t("voice.pasteHotkey")])
+        pop.selectItem(at: settings.pasteDictationDoubleTap ? 0 : 1)
+        pop.target = self; pop.action = #selector(pasteDictationTriggerChanged(_:))
+        return pop
+    }
+    @objc private func pasteDictationTriggerChanged(_ p: NSPopUpButton) {
+        settings.pasteDictationDoubleTap = (p.indexOfSelectedItem == 0)
+    }
 
     private weak var clipboardThresholdBox: CollapsibleRow?
     private weak var clipboardPopUp: NSPopUpButton?

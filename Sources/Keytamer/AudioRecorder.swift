@@ -52,6 +52,7 @@ final class AudioRecorder: NSObject {
     private var nonZeroSeen = false            // под lock
     private var levelFrameAcc = 0              // троттлинг уровня по кадрам (только sampleQueue)
     private var capturing = false              // реально ли пишем в samples (vs тёплый холостой ход)
+    private var paused = false                 // пауза записи: захват активен, но сэмплы не сохраняются
     private var warmRelease: DispatchWorkItem?
     private var warmSeconds: Double { Double(AppSettings.shared.voiceWarmSeconds) }  // длина «тёплого окна»
 
@@ -85,8 +86,23 @@ final class AudioRecorder: NSObject {
     // capturing без lock не давала happens-before с чтением в делегате → протухший true мог дописать
     // хвост ПОСЛЕ снапшота stop(). Пишем capturing только через setCapturing().
     var isRecording: Bool { lock.lock(); defer { lock.unlock() }; return capturing }
+    var isPaused: Bool { lock.lock(); defer { lock.unlock() }; return paused }
     var duration: Double { lock.lock(); defer { lock.unlock() }; return Double(samples.count) / 16_000.0 }
     private func setCapturing(_ v: Bool) { lock.lock(); capturing = v; lock.unlock() }
+
+    func pause() {
+        lock.lock()
+        paused = true
+        lock.unlock()
+        kbLog("voice rec: запись на паузе")
+    }
+
+    func resume() {
+        lock.lock()
+        paused = false
+        lock.unlock()
+        kbLog("voice rec: запись возобновлена")
+    }
 
     static func requestAccess() async -> Bool {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
@@ -99,7 +115,7 @@ final class AudioRecorder: NSObject {
 
     func start() throws {
         warmRelease?.cancel(); warmRelease = nil
-        lock.lock(); samples.removeAll(keepingCapacity: true); loggedInput = false; firstBufferSeen = false; nonZeroSeen = false; lock.unlock()
+        lock.lock(); samples.removeAll(keepingCapacity: true); paused = false; loggedInput = false; firstBufferSeen = false; nonZeroSeen = false; lock.unlock()
         // Тёплое окно — но с ПРОВЕРКОЙ АКТУАЛЬНОСТИ: смена микрофона в меню/настройках ничего не
         // постит, поэтому тёплая сессия могла быть собрана на другом устройстве. Сравнение двух
         // строк — ноль обращений к CoreAudio на горячем пути (регресс 0.2.53 не повторяем).
@@ -392,7 +408,7 @@ final class AudioRecorder: NSObject {
         setCapturing(false)   // под lock: happens-before с чтением в делегате — хвост не допишется после снапшота
         watchdog?.cancel(); watchdog = nil
         deadSignalWatchdog?.cancel(); deadSignalWatchdog = nil
-        lock.lock(); let out = samples; lock.unlock()
+        lock.lock(); paused = false; let out = samples; lock.unlock()
         // Тёплое окно (opt-in): держим сессию живой ещё warmSeconds — повторная диктовка стартует
         // мгновенно. Оранжевый индикатор горит это время (честно: микрофон формально открыт,
         // буферы молча отбрасываются). Иначе — сразу отпускаем.
@@ -477,6 +493,12 @@ extension AudioRecorder: AVCaptureAudioDataOutputSampleBufferDelegate {
                 if deadStrikes != 0 { deadStrikes = 0 }
             }           // вход реально живой (а не пустой поток)
             guard capturing else { lock.unlock(); return }   // тёплый холостой ход: отбрасываем молча
+            if paused {
+                let lv = _onLevel
+                lock.unlock()
+                lv?(0)
+                return
+            }
             let chunk = Array(UnsafeBufferPointer(start: ch, count: n))
             samples.append(contentsOf: chunk)
             let cb = _onChunk, lv = _onLevel, draft = _onDraft

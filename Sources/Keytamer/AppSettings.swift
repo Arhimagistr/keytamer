@@ -268,6 +268,22 @@ final class AppSettings {
     /// Звук старта/стопа записи (отдельно от звука конвертации). По умолчанию включён.
     var voiceSoundEnabled: Bool { get { d.bool(forKey: "voiceSoundEnabled") } set { d.set(newValue, forKey: "voiceSoundEnabled") } }
 
+    /// Отмена записи по одиночному клику Command (ADR-011)
+    var voiceCancelByCommand: Bool {
+        get { d.object(forKey: "voiceCancelByCommand") == nil ? true : d.bool(forKey: "voiceCancelByCommand") }
+        set { d.set(newValue, forKey: "voiceCancelByCommand") }
+    }
+
+    /// Пауза/продолжение записи по пробелу (ADR-011)
+    var voicePauseEnabled: Bool {
+        get { d.object(forKey: "voicePauseEnabled") == nil ? true : d.bool(forKey: "voicePauseEnabled") }
+        set { d.set(newValue, forKey: "voicePauseEnabled") }
+    }
+    var voicePauseKeyCode: Int {
+        get { d.object(forKey: "voicePauseKeyCode") == nil ? 49 : d.integer(forKey: "voicePauseKeyCode") }
+        set { d.set(newValue, forKey: "voicePauseKeyCode") }
+    }
+
     /// Опции ВЫВОДА диктовки (просили несколько человек, задача #41). Обе выключены по умолчанию:
     /// модель отдаёт нормально оформленный текст, и портить его без просьбы мы не должны.
     /// Заглавная первая буква мешает тем, кто диктует в середину предложения; точка в конце —
@@ -657,7 +673,24 @@ final class AppSettings {
         get { d.string(forKey: "pasteDictationKeyLabel") ?? "" }
         set { d.set(newValue, forKey: "pasteDictationKeyLabel") }
     }
-    var pasteDictationEnabled: Bool { pasteDictationKeyCode >= 0 }
+    var pasteDictationEnabled: Bool { pasteDictationKeyCode >= 0 || pasteDictationDoubleTap }
+
+    /// Режим вставки последней диктовки: "hotkey" или "doubletap" (по умолчанию 2× Option) (ADR-011)
+    var pasteDictationTrigger: String {
+        get { d.string(forKey: "pasteDictationTrigger") ?? "doubletap" }
+        set { d.set(newValue, forKey: "pasteDictationTrigger") }
+    }
+    var pasteDictationDoubleTap: Bool {
+        get { pasteDictationTrigger == "doubletap" }
+        set { pasteDictationTrigger = newValue ? "doubletap" : "hotkey" }
+    }
+    var pasteDictationDoubleTapModifier: UInt64 {
+        get {
+            let v = d.object(forKey: "pasteDictationDoubleTapMod") as? Int
+            return UInt64(bitPattern: Int64(v ?? Int(CGEventFlags.maskAlternate.rawValue)))
+        }
+        set { d.set(Int(bitPattern: UInt(newValue)), forKey: "pasteDictationDoubleTapMod") }
+    }
 
     /// Скорость воспроизведения клипа диктовки. Запоминается между запусками: человек, слушающий
     /// свои заметки на 2×, не должен возвращать её каждый раз (просьба автора 10.08).

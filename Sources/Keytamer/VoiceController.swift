@@ -221,6 +221,25 @@ final class VoiceController {
     /// Зовётся, когда диктовку нажали, а модели нет — UI предложит скачать.
     var onNeedModel: (() -> Void)?
 
+    /// Флаг состояния паузы текущей записи
+    var isPaused: Bool { recorder.isPaused }
+
+    /// Переключение паузы текущей активной записи (ADR-011)
+    func togglePause() {
+        guard isRecording else { return }
+        if recorder.isPaused {
+            recorder.resume()
+            playCue(startSound)
+            VoiceIndicator.shared.setPaused(false)
+            kbLog("voice: запись возобновлена")
+        } else {
+            recorder.pause()
+            playCue(stopSound)
+            VoiceIndicator.shared.setPaused(true)
+            kbLog("voice: запись поставлена на паузу")
+        }
+    }
+
     // MARK: - Hold-to-talk
 
     /// Зажали хоткей диктовки. ВАЖНО: НЕ блокируем по «идёт транскрипция прошлого клипа» — запись и
@@ -308,6 +327,7 @@ final class VoiceController {
         }
         guard recorder.isRecording else { VoiceGate.set(false); dropPendingHistoryOnly(); return }
         stopLiveDraft()
+        VoiceIndicator.shared.setPaused(false)
         if streamingActive { streamEnd(); return }   // потоковый путь: финализируем стрим
         noteSendGesture()         // правый ⌘ в момент отпускания = «отправить» (задача 124)
         let samples = recorder.stop()
@@ -539,6 +559,7 @@ final class VoiceController {
         }
         guard recorder.isRecording else { VoiceGate.set(false); return }
         stopLiveDraft()
+        VoiceIndicator.shared.setPaused(false)
         if streamingActive { streamCancel(); return }   // потоковый путь: стереть напечатанное
         // ОТМЕНА С СОХРАНЕНИЕМ В ИСТОРИЮ (R37, выключено по умолчанию). Человек просил: «нажал
         // Escape — пусть всё равно распознает и положит куда-нибудь». Идём ТЕМ ЖЕ путём, что и

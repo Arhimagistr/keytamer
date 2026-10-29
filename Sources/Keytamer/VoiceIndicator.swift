@@ -243,6 +243,21 @@ final class VoiceIndicator {
         DispatchQueue.main.async { guard self.mode == .recording, self.onScreen else { return }; self.wave.push(rms) }
     }
 
+    /// Отображение состояния паузы записи
+    func setPaused(_ paused: Bool) {
+        DispatchQueue.main.async {
+            guard self.mode == .recording, self.onScreen else { return }
+            if paused {
+                self.label.stringValue = L10n.t("voice.paused")
+                self.wave.stop()
+            } else {
+                self.label.stringValue = L10n.t("voice.listening")
+                self.wave.start()
+            }
+            self.relayout(text: self.label.stringValue, showWave: true)
+        }
+    }
+
     /// Короткий тост у курсора (обучение на отмене и т.п.) — сам прячется через ~2.2с.
     ///
     /// ⚠️ ДВА ДЕФЕКТА, ПОЙМАННЫЕ 04.08.2026 ПО ЖАЛОБЕ «плашка „Слушаю“ иногда пропадает во время

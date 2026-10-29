@@ -512,7 +512,18 @@ enum L10n {
         "alert.relaunch.no":[.ru: "Не сейчас", .en: "Not now"],
         // Индикатор диктовки (VoiceIndicator) + a11y статусов меню-бара
         "voice.listening":[.ru: "Слушаю…", .en: "Listening…"],
+        "voice.paused":   [.ru: "Пауза",    .en: "Paused"],
         "voice.recognizing":[.ru: "Распознаю…", .en: "Recognizing…"],
+        "voice.pauseEnabled": [.ru: "Пауза записи по пробелу", .en: "Pause recording with Space"],
+        "voice.pauseEnabledSub": [.ru: "Во время записи нажатие пробела ставит диктовку на паузу и продолжает её", .en: "Pressing Space while recording pauses and resumes dictation"],
+        "voice.pauseEnabledHelp": [.ru: "Позволяет сделать паузу в речи без отмены и без разбиения на отдельные фразы.", .en: "Allows pausing speech without cancelling or splitting into separate clips."],
+        "voice.cancelByCommand": [.ru: "Отмена записи по клавише ⌘", .en: "Cancel recording with ⌘ key"],
+        "voice.cancelByCommandSub": [.ru: "Одиночное нажатие Command во время записи отменяет её (наряду с Escape)", .en: "Solo Command tap while recording cancels it (along with Escape)"],
+        "voice.cancelByCommandHelp": [.ru: "Быстрая отмена записи большим пальцем без необходимости тянуться к Escape.", .en: "Fast thumb cancellation without reaching for Escape."],
+        "voice.pasteTrigger": [.ru: "Вставка последней расшифровки", .en: "Paste last dictation"],
+        "voice.pasteTriggerSub": [.ru: "Способ быстрой повторной вставки текста последней диктовки", .en: "Method for quick pasting last dictation text"],
+        "voice.pasteDoubleOpt": [.ru: "2× Option (двойной ⌥)", .en: "2× Option (double tap ⌥)"],
+        "voice.pasteHotkey": [.ru: "Сочетание клавиш", .en: "Keyboard shortcut"],
         "a11y.recording": [.ru: "Запись", .en: "Recording"],
         // Хранение истории голоса (SettingsWindow)
         "ret.30m":        [.ru: "30 минут", .en: "30 minutes"],
